@@ -1,0 +1,54 @@
+version: "3.8"
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: localrag-qdrant
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - ./data/qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+    environment:
+      - QDRANT__SERVICE__GRPC_PORT=6334
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: localrag-api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./grammars:/app/grammars
+    env_file:
+      - .env
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    container_name: localrag-ui
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./frontend:/app/frontend
+      - ./data:/app/data
+    env_file:
+      - .env
+    depends_on:
+      - api
+    restart: unless-stopped
+    command: streamlit run frontend/streamlit_app.py --server.port 8501 --server.address 0.0.0.0
