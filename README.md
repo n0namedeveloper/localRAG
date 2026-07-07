@@ -264,5 +264,4 @@ Distributed under the MIT License. See [LICENSE](LICENSE).
 - [FastAPI](https://fastapi.tiangolo.com/)
 - [Streamlit](https://streamlit.io/)
 
-- 
 Made with ❤️ and 🤖 by Artsiom Beniash. Make the world a better place to live! <3
