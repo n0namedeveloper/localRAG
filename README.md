@@ -251,7 +251,8 @@ python -m pytest tests/
 
 ## 📄 License
 
-MIT
+Distributed under the MIT License. See [LICENSE](LICENSE).
+
 
 ---
 
@@ -262,3 +263,6 @@ MIT
 - [DeepSeek](https://www.deepseek.com/)
 - [FastAPI](https://fastapi.tiangolo.com/)
 - [Streamlit](https://streamlit.io/)
+
+- 
+Made with ❤️ and 🤖 by Artsiom Beniash. Make the world a better place to live! <3
