@@ -5,7 +5,7 @@ Supports streaming SSE, system prompts, structured output.
 
 import json
 import logging
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator
 
 import httpx
 from httpx import Timeout
@@ -14,7 +14,6 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# System prompt tailored for code-aware RAG
 SYSTEM_PROMPT = """You are an AI assistant that helps developers understand codebases.
 You have access to repository code via RAG.
 
@@ -41,7 +40,6 @@ class DeepSeekClient:
     Supports:
       - Synchronous chat completion
       - Server-Sent Events streaming
-      - Tool/function calling (future)
     """
 
     def __init__(self):
@@ -60,11 +58,15 @@ class DeepSeekClient:
         )
 
     def _build_headers(self) -> dict:
-        """Build request headers."""
         return {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
         }
+
+    def _build_messages(self, messages: list[dict], system_prompt: str | None) -> list[dict]:
+        if system_prompt:
+            return [{"role": "system", "content": system_prompt}] + messages
+        return messages
 
     def chat(
         self,
@@ -76,23 +78,12 @@ class DeepSeekClient:
         """
         Send a synchronous chat request.
 
-        Args:
-            messages: List of {"role": "...", "content": "..."}
-            system_prompt: Optional override for system prompt.
-            temperature: LLM temperature (0.0-1.0).
-            max_tokens: Max tokens in response.
-
         Returns:
             Response text string.
         """
-        full_messages = []
-        if system_prompt:
-            full_messages.append({"role": "system", "content": system_prompt})
-        full_messages.extend(messages)
-
         payload = {
             "model": self.model,
-            "messages": full_messages,
+            "messages": self._build_messages(messages, system_prompt),
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": False,
@@ -105,17 +96,12 @@ class DeepSeekClient:
                 json=payload,
             )
             response.raise_for_status()
-            data = response.json()
-            return data["choices"][0]["message"]["content"]
+            return response.json()["choices"][0]["message"]["content"]
+        except httpx.HTTPStatusError as e:
+            logger.error("DeepSeek API error %s: %s", e.response.status_code, e.response.text)
+            raise
         except Exception as e:
-            logger.error(f"DeepSeek API call failed: {e}")
-            # Try to extract error details
-            if hasattr(e, "response") and e.response:
-                try:
-                    detail = e.response.json()
-                    logger.error(f"API error detail: {detail}")
-                except Exception:
-                    pass
+            logger.error("DeepSeek API call failed", exc_info=True)
             raise
 
     async def chat_stream(
@@ -128,21 +114,12 @@ class DeepSeekClient:
         """
         Stream chat via SSE.
 
-        Args:
-            messages: List of {"role": "...", "content": "..."}
-            system_prompt: Optional override for system prompt.
-
         Yields:
             Text chunks as they arrive.
         """
-        full_messages = []
-        if system_prompt:
-            full_messages.append({"role": "system", "content": system_prompt})
-        full_messages.extend(messages)
-
         payload = {
             "model": self.model,
-            "messages": full_messages,
+            "messages": self._build_messages(messages, system_prompt),
             "temperature": temperature,
             "max_tokens": max_tokens,
             "stream": True,
@@ -157,36 +134,33 @@ class DeepSeekClient:
             ) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
-                    if line.startswith("data: "):
-                        data_str = line[6:].strip()
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            data = json.loads(data_str)
-                            choices = data.get("choices", [])
-                            if not choices:
-                                # Some providers send empty choices in middle of stream
-                                continue
-                            delta = choices[0].get("delta", {})
-                            content = delta.get("content", "")
-                            if content:
-                                yield content
-                        except json.JSONDecodeError:
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(data_str)
+                        choices = data.get("choices", [])
+                        if not choices:
                             continue
-                        except (KeyError, IndexError) as e:
-                            logger.warning(f"Unexpected SSE chunk format: {data_str} ({e})")
-                            continue
-        except Exception as e:
-            logger.error(f"DeepSeek streaming failed: {e}")
-            yield f"\n\n[Error generating response: {str(e)}]"
+                        content = choices[0].get("delta", {}).get("content", "")
+                        if content:
+                            yield content
+                    except json.JSONDecodeError:
+                        continue
+                    except (KeyError, IndexError):
+                        logger.warning("Unexpected SSE chunk format: %s", data_str)
+                        continue
+        except Exception:
+            logger.error("DeepSeek streaming failed", exc_info=True)
+            yield "\n\n[Error generating response]"
 
     def close(self):
-        """Close HTTP clients."""
+        """Close the synchronous HTTP client."""
         self._http_client.close()
-        import asyncio
-        try:
-            asyncio.get_event_loop().run_until_complete(
-                self._async_http_client.aclose()
-            )
-        except Exception:
-            pass
+
+    async def aclose(self):
+        """Close both HTTP clients (call from async context / lifespan shutdown)."""
+        self._http_client.close()
+        await self._async_http_client.aclose()
