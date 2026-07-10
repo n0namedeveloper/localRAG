@@ -1,7 +1,7 @@
 """Repository management API endpoints."""
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.models.schemas import RepoCloneRequest, RepoStatusResponse
@@ -12,14 +12,21 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/repo", tags=["repo"])
 
-# Global pipeline reference - set during app startup
-_pipeline_instance: IngestionPipeline | None = None
 
-def get_pipeline() -> IngestionPipeline:
-    """Dependency injection for ingestion pipeline."""
-    if _pipeline_instance is None:
+def get_pipeline(request: Request) -> IngestionPipeline:
+    """Dependency: retrieve ingestion pipeline from app.state."""
+    pipeline = getattr(request.app.state, "pipeline", None)
+    if pipeline is None:
         raise HTTPException(status_code=503, detail="Pipeline not initialized")
-    return _pipeline_instance
+    return pipeline
+
+
+def get_repo_manager(request: Request) -> RepoManager:
+    """Dependency: retrieve repo manager from app.state."""
+    manager = getattr(request.app.state, "repo_manager", None)
+    if manager is None:
+        raise HTTPException(status_code=503, detail="RepoManager not initialized")
+    return manager
 
 
 @router.post("/clone", response_model=RepoStatusResponse)
@@ -38,7 +45,6 @@ async def clone_repo(
         }
     """
     try:
-        # Convert empty string to None so repo_manager clones the default branch
         effective_branch = request.branch if request.branch and request.branch.strip() else None
         result = pipeline.run(
             repo_url=request.repo_url,
@@ -51,11 +57,11 @@ async def clone_repo(
             status=result["status"],
             files_indexed=result.get("files_parsed", 0),
             symbols_indexed=result.get("symbols_count", 0),
-            last_indexed=None,  # Not exposed in this simplified version
+            last_indexed=None,
             error_message=result.get("error"),
         )
     except Exception as e:
-        logger.exception(f"Clone error: {e}")
+        logger.exception("Clone error")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -64,12 +70,7 @@ async def get_repo_status(
     repo_url: str,
     pipeline: IngestionPipeline = Depends(get_pipeline),
 ):
-    """
-    Get the current indexing status of a repository.
-
-    Returns:
-        RepoStatusResponse with status and stats.
-    """
+    """Get the current indexing status of a repository."""
     try:
         status_enum = pipeline.get_repo_status(repo_url)
         stats = pipeline.get_index_stats(repo_url)
@@ -83,29 +84,23 @@ async def get_repo_status(
             error_message=None,
         )
     except Exception as e:
-        logger.exception(f"Status error: {e}")
+        logger.exception("Status error")
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/list")
 async def list_repos(
-    repo_manager: RepoManager = Depends(lambda: RepoManager()),
+    repo_manager: RepoManager = Depends(get_repo_manager),
 ):
-    """
-    List all cloned repositories.
-
-    Returns:
-        List of repo names.
-    """
+    """List all cloned repositories."""
     try:
-        # Just list directories in repos dir
         repos_dir = repo_manager.settings.repos_dir
-        repos = []
-        if repos_dir.exists():
-            for item in repos_dir.iterdir():
-                if item.is_dir():
-                    repos.append(item.name)
+        repos = [
+            item.name
+            for item in repos_dir.iterdir()
+            if item.is_dir()
+        ] if repos_dir.exists() else []
         return {"repos": repos}
     except Exception as e:
-        logger.exception(f"List repos error: {e}")
+        logger.exception("List repos error")
         raise HTTPException(status_code=500, detail=str(e))

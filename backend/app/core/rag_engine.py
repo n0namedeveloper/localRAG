@@ -12,7 +12,7 @@ Pipeline:
 
 import logging
 import re
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator
 
 from app.config import settings
 from app.models.schemas import (
@@ -58,36 +58,24 @@ class RAGEngine:
         Returns:
             ChatResponse with answer text and source references.
         """
-        # 1. Vector retrieval
         chunks = self._retrieve_chunks(
             query=request.question,
             repo_url=request.repo_url,
             top_k=request.max_chunks,
         )
-
-        # 2. Graph enrichment (expand with +1 hop neighbors)
         enriched = self._enrich_with_graph(chunks, hops=settings.max_graph_hops)
-
-        # 3. Build augmented prompt
         prompt = self._build_prompt(request.question, enriched)
-
-        # 4. Generate answer
         answer_text = self.llm.chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt=SYSTEM_PROMPT,
             temperature=0.2,
         )
-
-        # 5. Parse sources from the answer text
         sources = self._extract_sources(answer_text, chunks)
-
-        # 6. Build GitHub permalinks
         repo_name = self._extract_repo_name(request.repo_url)
         for source in sources:
             source.github_url = self._build_github_url(
                 request.repo_url, source.file_path, source.start_line
             )
-
         return ChatResponse(
             answer=answer_text,
             sources=sources,
@@ -97,13 +85,14 @@ class RAGEngine:
 
     async def answer_stream(
         self, request: ChatRequest
-    ) -> AsyncGenerator[str, None]:
+    ) -> AsyncGenerator[str | list[SourceReference], None]:
         """
         Streaming RAG pipeline.
 
-        Yields SSE chunks: token text and final JSON with sources.
+        Yields:
+            - str tokens during generation
+            - list[SourceReference] as the final item after streaming completes
         """
-        # 1-3. Same retrieval + enrichment
         chunks = self._retrieve_chunks(
             query=request.question,
             repo_url=request.repo_url,
@@ -112,7 +101,6 @@ class RAGEngine:
         enriched = self._enrich_with_graph(chunks, hops=settings.max_graph_hops)
         prompt = self._build_prompt(request.question, enriched)
 
-        # 4. Stream tokens
         full_answer = ""
         async for token in self.llm.chat_stream(
             messages=[{"role": "user", "content": prompt}],
@@ -121,22 +109,25 @@ class RAGEngine:
             full_answer += token
             yield token
 
-        # Sources are sent separately by the API endpoint after streaming completes
+        # Yield sources as the final item — no second vector search needed
+        sources = self._extract_sources(full_answer, chunks)
+        for source in sources:
+            source.github_url = self._build_github_url(
+                request.repo_url, source.file_path, source.start_line
+            )
+        yield sources
 
     def _retrieve_chunks(
         self, query: str, repo_url: str, top_k: int
     ) -> list[tuple[ChunkMetadata, float]]:
-        """Vector search + symbol name search for robustness."""
+        """Vector search for relevant code chunks."""
         repo_name = self._extract_repo_name(repo_url)
-
-        # Primary: semantic vector search
-        results = self.vector_store.search(
+        return self.vector_store.search(
             query=query,
             repo_name=repo_name,
             top_k=top_k,
             score_threshold=0.3,
         )
-        return results
 
     def _enrich_with_graph(
         self,
@@ -144,35 +135,30 @@ class RAGEngine:
         hops: int = 1,
     ) -> list[tuple[ChunkMetadata, float]]:
         """Expand results with graph neighbors (+1 hop)."""
-        seen_ids = set()
+        seen_ids: set[str] = set()
         enriched: list[tuple[ChunkMetadata, float]] = []
 
         for meta, score in chunks:
             seen_ids.add(meta.symbol_id)
             enriched.append((meta, score))
 
-            # Get neighbors from graph
-            neighbor_ids = self.dep_graph.get_neighbors(meta.symbol_id, hops=hops)
-            for nid in neighbor_ids:
-                if nid not in seen_ids and nid in self.dep_graph.graph:
-                    seen_ids.add(nid)
-                    # Build a pseudo-metadata for the neighbor
-                    node_data = self.dep_graph.graph.nodes[nid]
-                    neighbor_meta = ChunkMetadata(
-                        symbol_id=nid,
-                        symbol_name=node_data.get("name", "unknown"),
-                        symbol_type=SymbolType(
-                            node_data.get("symbol_type", "function")
-                        ),
-                        file_path=node_data.get("file_path", ""),
-                        start_line=0,
-                        end_line=0,
-                        language="",
-                        repo_name=meta.repo_name,
-                        dependencies=[],
-                    )
-                    # Give lower score than the matched chunk
-                    enriched.append((neighbor_meta, score * 0.6))
+            for nid in self.dep_graph.get_neighbors(meta.symbol_id, hops=hops):
+                if nid in seen_ids or nid not in self.dep_graph.graph:
+                    continue
+                seen_ids.add(nid)
+                node_data = self.dep_graph.graph.nodes[nid]
+                neighbor_meta = ChunkMetadata(
+                    symbol_id=nid,
+                    symbol_name=node_data.get("name", "unknown"),
+                    symbol_type=SymbolType(node_data.get("symbol_type", "function")),
+                    file_path=node_data.get("file_path", ""),
+                    start_line=0,
+                    end_line=0,
+                    language="",
+                    repo_name=meta.repo_name,
+                    dependencies=[],
+                )
+                enriched.append((neighbor_meta, score * 0.6))
 
         return enriched
 
@@ -182,18 +168,15 @@ class RAGEngine:
         chunks: list[tuple[ChunkMetadata, float]],
     ) -> str:
         """Build an augmented prompt with code context."""
-        sections = []
-        sections.append("## Relevant code from the repository\n")
+        sections = ["## Relevant code from the repository\n"]
 
         for i, (meta, score) in enumerate(chunks):
             file_line = f"{meta.file_path}:{meta.start_line}-{meta.end_line}"
-            header = f"[{i+1}] {meta.symbol_name} ({meta.symbol_type.value}) — {file_line}"
+            header = f"[{i + 1}] {meta.symbol_name} ({meta.symbol_type.value}) — {file_line}"
             if meta.parent_class:
                 header += f" — class: {meta.parent_class}"
-
-            # If we have the symbol signature from earlier context
-            sig = f" {meta.signature}" if meta.signature else ""
-            sections.append(f"### {header}\n{sig}")
+            sig = f"\n```\n{meta.signature}\n```" if meta.signature else ""
+            sections.append(f"### {header}{sig}")
 
         sections.append("\n## User Question\n")
         sections.append(question)
@@ -207,24 +190,20 @@ class RAGEngine:
     ) -> list[SourceReference]:
         """Parse source references from LLM answer and match to chunks."""
         sources: list[SourceReference] = []
-
-        # Pattern: [src/file_path:line] or [src/file_path:start-end]
         pattern = r"\[src/([^:\]]+):(\d+)(?:-(\d+))?\]"
         matches = re.findall(pattern, answer)
 
         file_chunks: dict[str, tuple[ChunkMetadata, float]] = {}
         for meta, score in chunks:
-            key = meta.file_path
-            if key not in file_chunks or score > file_chunks[key][1]:
-                file_chunks[key] = (meta, score)
+            if meta.file_path not in file_chunks or score > file_chunks[meta.file_path][1]:
+                file_chunks[meta.file_path] = (meta, score)
 
         for file_path, start, end in matches:
-            end_line = int(end) if end else int(start)
             start_line = int(start)
-
-            meta = file_chunks.get(file_path)
-            if meta:
-                meta_obj, score = meta
+            end_line = int(end) if end else start_line
+            chunk = file_chunks.get(file_path)
+            if chunk:
+                meta_obj, score = chunk
                 sources.append(
                     SourceReference(
                         file_path=file_path,
@@ -232,12 +211,11 @@ class RAGEngine:
                         end_line=end_line,
                         symbol_name=meta_obj.symbol_name,
                         symbol_type=meta_obj.symbol_type,
-                        snippet=meta_obj.signature[:200],
+                        snippet=meta_obj.signature[:200] if meta_obj.signature else "",
                         relevance_score=score,
                     )
                 )
             else:
-                # No metadata found — still add a reference
                 sources.append(
                     SourceReference(
                         file_path=file_path,
@@ -250,9 +228,7 @@ class RAGEngine:
 
         return sources
 
-    def _build_github_url(
-        self, repo_url: str, file_path: str, line: int
-    ) -> str:
+    def _build_github_url(self, repo_url: str, file_path: str, line: int) -> str:
         """Build a GitHub permalink to a specific line."""
         repo_url = repo_url.rstrip(".git").rstrip("/")
         return f"{repo_url}/blob/main/{file_path}#L{line}"
