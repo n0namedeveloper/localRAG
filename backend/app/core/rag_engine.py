@@ -121,24 +121,7 @@ class RAGEngine:
             full_answer += token
             yield token
 
-        # 5. Parse sources
-        sources = self._extract_sources(full_answer, chunks)
-        repo_name = self._extract_repo_name(request.repo_url)
-        for source in sources:
-            source.github_url = self._build_github_url(
-                request.repo_url, source.file_path, source.start_line
-            )
-
-        # 6. Yield final JSON with sources (sentinel for client)
-        import json
-        final_payload = json.dumps(
-            {
-                "type": "sources",
-                "sources": [s.model_dump() for s in sources],
-                "repo_name": repo_name,
-            }
-        )
-        yield f"\n\n<!-- SOURCES:{final_payload} -->"
+        # Sources are sent separately by the API endpoint after streaming completes
 
     def _retrieve_chunks(
         self, query: str, repo_url: str, top_k: int

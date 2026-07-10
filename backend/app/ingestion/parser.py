@@ -11,11 +11,27 @@ from pathlib import Path
 from typing import Optional
 
 from tree_sitter import Language, Parser, Node, Query
-from tree_sitter_languages import get_language, get_parser
+from tree_sitter_python import language as python_language
 
 from app.models.schemas import ParsedSymbol, SymbolType, DependencyEdge
 
 logger = logging.getLogger(__name__)
+
+# ─── Language grammar cache ─────────────────────────────────────
+
+LANGUAGES: dict = {}
+
+def _get_language(lang_name: str):
+    """Lazy load and cache a tree-sitter Language object for the given language."""
+    if lang_name not in LANGUAGES:
+        if lang_name == "python":
+            LANGUAGES[lang_name] = Language(python_language())
+        else:
+            raise ValueError(
+                f"Language not available: {lang_name}. "
+                "Install the appropriate tree-sitter-*-lang package."
+            )
+    return LANGUAGES[lang_name]
 
 # ─── Language-specific query maps ─────────────────────────────────
 
@@ -273,7 +289,8 @@ class CodeParser:
         """Get or create a tree-sitter parser for the given language."""
         if language not in self._parsers:
             try:
-                self._parsers[language] = get_parser(language)
+                lang_obj = _get_language(language)
+                self._parsers[language] = Parser(lang_obj)
             except Exception as e:
                 raise ValueError(
                     f"Unsupported language: {language}. "
@@ -288,16 +305,16 @@ class CodeParser:
 
         if language not in self._queries:
             try:
-                lang_obj = get_language(language)
+                lang_obj = _get_language(language)
                 self._queries[language] = {}
                 for query_name, query_str in LANGUAGE_QUERIES[language].items():
-                    try:
-                        q = lang_obj.query(query_str)
-                        self._queries[language][query_name] = q
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to compile query '{query_name}' for {language}: {e}"
-                        )
+                     try:
+                         q = lang_obj.query(query_str)
+                         self._queries[language][query_name] = q
+                     except Exception as e:
+                         logger.warning(
+                             f"Failed to compile query '{query_name}' for {language}: {e}"
+                         )
             except Exception as e:
                 raise ValueError(f"Cannot load language grammar for {language}: {e}")
 
@@ -324,6 +341,9 @@ class CodeParser:
         Returns:
             List of ParsedSymbol extracted from the file.
         """
+        # Accept both Path and str for file_path
+        if not isinstance(file_path, Path):
+            file_path = Path(file_path)
         language = detect_language(file_path)
         if language is None:
             return []

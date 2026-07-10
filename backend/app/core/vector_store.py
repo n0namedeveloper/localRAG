@@ -13,7 +13,7 @@ from qdrant_client.http import models as qdrant_models
 from qdrant_client.http.exceptions import ResponseHandlingException
 
 from app.config import settings
-from app.models.schemas import CodeChunk, ChunkMetadata, ChunkMetadata
+from app.models.schemas import CodeChunk, ChunkMetadata
 from app.core.embedding import EmbeddingProvider
 
 logger = logging.getLogger(__name__)
@@ -56,18 +56,28 @@ class VectorStore:
                     size=self.embedder.dimension,
                     distance=qdrant_models.Distance.COSINE,
                 ),
-                # Payload indexing for fast filter by repo
-                payload_schema={
-                    "repo_name": qdrant_models.PayloadSchemaType.KEYWORD,
-                    "file_path": qdrant_models.PayloadSchemaType.KEYWORD,
-                    "language": qdrant_models.PayloadSchemaType.KEYWORD,
-                    "symbol_type": qdrant_models.PayloadSchemaType.KEYWORD,
-                    "symbol_name": qdrant_models.PayloadSchemaType.KEYWORD,
-                    "parent_class": qdrant_models.PayloadSchemaType.KEYWORD,
-                    "start_line": qdrant_models.PayloadSchemaType.INTEGER,
-                    "end_line": qdrant_models.PayloadSchemaType.INTEGER,
-                },
             )
+
+            # Create payload indexes for fast filtering
+            keyword_fields = [
+                "repo_name", "file_path", "language",
+                "symbol_type", "symbol_name", "parent_class",
+            ]
+            integer_fields = ["start_line", "end_line"]
+
+            for field in keyword_fields:
+                self.client.create_payload_index(
+                    collection_name=self._collection_name,
+                    field_name=field,
+                    field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
+                )
+            for field in integer_fields:
+                self.client.create_payload_index(
+                    collection_name=self._collection_name,
+                    field_name=field,
+                    field_schema=qdrant_models.PayloadSchemaType.INTEGER,
+                )
+
             logger.info(f"Collection '{self._collection_name}' created successfully")
         else:
             logger.debug(f"Collection '{self._collection_name}' exists")
@@ -235,23 +245,27 @@ class VectorStore:
         Delete all chunks for a repository.
 
         Returns:
-            Number of points deleted.
+            1 if successful, 0 otherwise.
         """
-        result = self.client.delete(
-            collection_name=self._collection_name,
-            points_selector=qdrant_models.FilterSelector(
-                filter=qdrant_models.Filter(
-                    must=[
-                        qdrant_models.FieldCondition(
-                            key="repo_name",
-                            match=qdrant_models.MatchValue(value=repo_name),
-                        )
-                    ]
-                )
-            ),
-        )
-        logger.info(f"Deleted repo '{repo_name}' from vector store")
-        return len(result)
+        try:
+            self.client.delete(
+                collection_name=self._collection_name,
+                points_selector=qdrant_models.FilterSelector(
+                    filter=qdrant_models.Filter(
+                        must=[
+                            qdrant_models.FieldCondition(
+                                key="repo_name",
+                                match=qdrant_models.MatchValue(value=repo_name),
+                            )
+                        ]
+                    )
+                ),
+            )
+            logger.info(f"Deleted repo '{repo_name}' from vector store")
+            return 1
+        except Exception as e:
+            logger.error(f"Failed to delete repo {repo_name}: {e}")
+            return 0
 
     def count_chunks(self, repo_name: str | None = None) -> int:
         """Count chunks, optionally filtered by repo."""

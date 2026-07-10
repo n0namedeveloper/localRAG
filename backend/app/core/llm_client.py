@@ -48,6 +48,7 @@ class DeepSeekClient:
         self.api_key = settings.deepseek_api_key
         self.base_url = settings.deepseek_base_url.rstrip("/")
         self.model = settings.deepseek_model
+        self.chat_completions_path = settings.deepseek_chat_completions_path.lstrip("/")
 
         self._http_client = httpx.Client(
             timeout=Timeout(60.0, connect=10.0, read=60.0),
@@ -99,7 +100,7 @@ class DeepSeekClient:
 
         try:
             response = self._http_client.post(
-                f"{self.base_url}/chat/completions",
+                f"{self.base_url}/{self.chat_completions_path}",
                 headers=self._build_headers(),
                 json=payload,
             )
@@ -150,7 +151,7 @@ class DeepSeekClient:
         try:
             async with self._async_http_client.stream(
                 "POST",
-                f"{self.base_url}/chat/completions",
+                f"{self.base_url}/{self.chat_completions_path}",
                 headers=self._build_headers(),
                 json=payload,
             ) as response:
@@ -162,11 +163,18 @@ class DeepSeekClient:
                             break
                         try:
                             data = json.loads(data_str)
-                            delta = data["choices"][0].get("delta", {})
+                            choices = data.get("choices", [])
+                            if not choices:
+                                # Some providers send empty choices in middle of stream
+                                continue
+                            delta = choices[0].get("delta", {})
                             content = delta.get("content", "")
                             if content:
                                 yield content
                         except json.JSONDecodeError:
+                            continue
+                        except (KeyError, IndexError) as e:
+                            logger.warning(f"Unexpected SSE chunk format: {data_str} ({e})")
                             continue
         except Exception as e:
             logger.error(f"DeepSeek streaming failed: {e}")

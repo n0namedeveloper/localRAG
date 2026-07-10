@@ -1,7 +1,7 @@
 """Health check API endpoint."""
 
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.core.vector_store import VectorStore
@@ -17,10 +17,26 @@ class HealthResponse(BaseModel):
     services: dict
 
 
+def get_vector_store() -> VectorStore:
+    """Dependency injection for vector store."""
+    store = getattr(get_vector_store, "store", None)
+    if store is None:
+        raise HTTPException(status_code=503, detail="Vector store not initialized")
+    return store
+
+
+def get_llm_client() -> DeepSeekClient:
+    """Dependency injection for LLM client."""
+    client = getattr(get_llm_client, "client", None)
+    if client is None:
+        raise HTTPException(status_code=503, detail="LLM client not initialized")
+    return client
+
+
 @router.get("", response_model=HealthResponse)
 async def health_check(
-    vector_store: VectorStore = None,
-    llm_client: DeepSeekClient = None,
+    vector_store: VectorStore = Depends(get_vector_store),
+    llm_client: DeepSeekClient = Depends(get_llm_client),
 ):
     """
     Check health of all services.

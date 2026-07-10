@@ -12,13 +12,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/repo", tags=["repo"])
 
+# Global pipeline reference - set during app startup
+_pipeline_instance: IngestionPipeline | None = None
 
 def get_pipeline() -> IngestionPipeline:
     """Dependency injection for ingestion pipeline."""
-    pipeline = getattr(get_pipeline, "pipeline", None)
-    if pipeline is None:
+    if _pipeline_instance is None:
         raise HTTPException(status_code=503, detail="Pipeline not initialized")
-    return pipeline
+    return _pipeline_instance
 
 
 @router.post("/clone", response_model=RepoStatusResponse)
@@ -37,9 +38,11 @@ async def clone_repo(
         }
     """
     try:
+        # Convert empty string to None so repo_manager clones the default branch
+        effective_branch = request.branch if request.branch and request.branch.strip() else None
         result = pipeline.run(
             repo_url=request.repo_url,
-            branch=request.branch,
+            branch=effective_branch,
             force_reindex=request.force_reindex,
         )
         return RepoStatusResponse(

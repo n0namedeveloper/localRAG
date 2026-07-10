@@ -56,7 +56,7 @@ class IngestionPipeline:
     def run(
         self,
         repo_url: str,
-        branch: str = "main",
+        branch: str | None = None,
         force_reindex: bool = False,
     ) -> dict:
         """
@@ -81,7 +81,9 @@ class IngestionPipeline:
         status = RepoStatus.INDEXING
         self._update_state(repo_name, "cloning")
 
-        repo, repo_path, status = self.repo_manager.get_repo(repo_url, branch)
+        repo, repo_path, status = self.repo_manager.get_repo(
+            repo_url, branch, github_token=settings.github_token
+        )
         if status == RepoStatus.ERROR:
             self._update_state(repo_name, "error")
             return {
@@ -134,8 +136,10 @@ class IngestionPipeline:
 
         # ── Step 5: Embed and index into Qdrant ──
         self._update_state(repo_name, "indexing")
-        indexed = self.vector_store.index_chunks(chunks)
-        logger.info(f"Indexed {indexed} chunks into Qdrant")
+        indexed_result = self.vector_store.index_chunks(chunks)
+        # indexed_result is an UpdateResult object; use the number of chunks provided as the count
+        indexed_count = len(chunks)
+        logger.info(f"Indexed {indexed_count} chunks into Qdrant")
 
         # ── Step 6: Build dependency graph ──
         self._update_state(repo_name, "building_graph")

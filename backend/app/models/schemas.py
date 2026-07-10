@@ -107,7 +107,7 @@ class RepoCloneRequest(BaseModel):
     repo_url: str = Field(
         description="GitHub repo URL, e.g. https://github.com/user/repo.git"
     )
-    branch: str = "main"
+    branch: str | None = None
     force_reindex: bool = False
 
 
@@ -152,11 +152,14 @@ class SearchRequest(BaseModel):
     repo_url: str
     query: str
     top_k: int = 10
+    score_threshold: float = 0.3
+    language: str | None = None
+    symbol_type: SymbolType | None = None
 
 
 class SearchResult(BaseModel):
-    chunks: list[CodeChunk]
-    total: int
+    metadata: ChunkMetadata
+    score: float
 
 
 class HealthResponse(BaseModel):

@@ -45,14 +45,16 @@ def get_repo_status(repo_url: str):
         st.error(f"Error fetching repo status: {e}")
     return None
 
-def clone_repo(repo_url: str, branch: str = "main", force_reindex: bool = False):
+def clone_repo(repo_url: str, branch: str = "", force_reindex: bool = False):
     """Clone or update a repository and start indexing."""
     try:
         payload = {
             "repo_url": repo_url,
-            "branch": branch,
             "force_reindex": force_reindex
         }
+        # Only send branch if user explicitly provided one
+        if branch and branch.strip():
+            payload["branch"] = branch.strip()
         resp = requests.post(f"{API_BASE}/repo/clone", json=payload)
         if resp.status_code == 200:
             return resp.json()
@@ -83,32 +85,51 @@ def send_chat_message(question: str, max_chunks: int = 15, stream: bool = True):
             if response.status_code == 200:
                 full_answer = ""
                 sources = []
+                buffer = ""
                 
-                for line in response.iter_lines():
-                    if line:
-                        line = line.decode('utf-8')
+                for chunk in response.iter_content(chunk_size=1, decode_unicode=True):
+                    if not chunk:
+                        continue
+                    
+                    if isinstance(chunk, bytes):
+                        chunk = chunk.decode('utf-8')
+                    
+                    buffer += chunk
+                    
+                    # Try to find complete lines (ending with \n)
+                    while '\n' in buffer:
+                        line, buffer = buffer.split('\n', 1)
+                        line = line.strip()
+                        
+                        if not line:
+                            continue
+                        
                         if line.startswith("data:"):
-                            data = line[5:].strip()
-                            if data.startswith('{'):
-                                try:
-                                    msg = json.loads(data)
-                                    if msg.get("event") == "token":
-                                        full_answer += msg.get("data", "")
-                                        yield msg.get("data", "")
-                                    elif msg.get("event") == "sources":
-                                        sources = json.loads(msg.get("data", "[]"))
-                                        yield {"sources": sources}
-                                    elif msg.get("event") == "done":
-                                        yield {"done": True}
-                                except json.JSONDecodeError:
-                                    continue
-                            else:
-                                full_answer += data
-                                yield data
-                        else:
-                            # Handle non-streaming data
-                            full_answer += line
-                            yield line
+                            data_str = line[5:].strip()
+                            if not data_str:
+                                continue
+                            
+                            try:
+                                msg = json.loads(data_str)
+                                event_type = msg.get("event")
+                                
+                                if event_type == "token":
+                                    token_text = msg.get("data", "")
+                                    full_answer += token_text
+                                    yield token_text
+                                elif event_type == "sources":
+                                    sources_data = msg.get("data", [])
+                                    sources = sources_data
+                                    yield {"sources": sources}
+                                elif event_type == "done":
+                                    yield {"done": True}
+                                elif event_type == "error":
+                                    error_data = msg.get("data", {})
+                                    st.error(error_data.get("error", "Unknown error"))
+                            except json.JSONDecodeError:
+                                # Plain text fallback - treat as token
+                                full_answer += data_str
+                                yield data_str
             else:
                 st.error(f"Streaming error: {response.text}")
         else:
@@ -156,7 +177,7 @@ with st.sidebar:
         st.session_state.repo_url = repo_url
         st.session_state.messages = []  # Reset chat when repo changes
         
-    branch = st.text_input("Branch", value="main")
+    branch = st.text_input("Branch", value="", placeholder="Leave blank for default branch")
     force_reindex = st.checkbox("Force Re-index", value=False)
     
     if st.button("📥 Clone & Index"):

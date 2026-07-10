@@ -9,13 +9,14 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com/v1"
     deepseek_model: str = "deepseek-chat"
+    deepseek_chat_completions_path: str = "/chat/completions"
 
     # Embeddings
     embedding_provider: str = "bge-m3"  # "bge-m3" or "openai"
     openai_api_key: str = ""
 
     # Qdrant
-    qdrant_host: str = "localhost"
+    qdrant_host: str = "qdrant"
     qdrant_port: int = 6333
     qdrant_collection_name: str = "code_chunks"
 
@@ -25,9 +26,14 @@ class Settings(BaseSettings):
     # Application
     data_dir: str = "./data"
     grammars_dir: str = "./grammars"
+    allowed_origins: list[str] = ["*"]
     max_chunks_per_query: int = 15
     max_graph_hops: int = 1
     log_level: str = "INFO"
+    host: str = "0.0.0.0"
+    port: int = 8000
+    reload: bool = True
+    debug: bool = False
 
     # Local model name (for sentence-transformers)
     local_embedding_model: str = "BAAI/bge-m3"

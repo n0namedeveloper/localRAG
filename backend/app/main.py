@@ -36,8 +36,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Initialize global components
-vector_store = VectorStore()
 embedding_provider = EmbeddingProvider()
+vector_store = VectorStore(embedding_provider=embedding_provider)
 dep_graph = DependencyGraph()
 llm_client = DeepSeekClient()
 
@@ -49,14 +49,21 @@ pipeline = IngestionPipeline(
 
 # Set components in globals for dependency injection
 # (This is a simplified approach; in production, use DI containers)
-setattr(chat_router, "get_rag_engine", lambda: None)
-setattr(chat_router.get_rag_engine, "engine", None)
+from app.api.health import get_vector_store as health_get_vs, get_llm_client as health_get_llm
+setattr(health_get_vs, "store", vector_store)
+setattr(health_get_llm, "client", llm_client)
 
-setattr(repo_router, "get_pipeline", lambda: None)
-setattr(repo_router.get_pipeline, "pipeline", pipeline)
+# Import the actual dependency functions (not the router attributes)
+from app.api.chat import get_rag_engine as chat_get_rag_engine
+from app.api.repo import get_pipeline as repo_get_pipeline, _pipeline_instance as repo_pipeline_instance
+from app.api.search import get_vector_store as search_get_vs
 
-setattr(search_router, "get_vector_store", lambda: None)
-setattr(search_router.get_vector_store, "store", vector_store)
+# Initialize engine attribute to None on the actual function objects
+setattr(chat_get_rag_engine, "engine", None)
+# Set pipeline on the module-level variable used by repo.py's get_pipeline function
+import app.api.repo as repo_module
+repo_module._pipeline_instance = pipeline
+setattr(search_get_vs, "store", vector_store)
 
 # Create FastAPI app
 app = FastAPI(
@@ -85,18 +92,12 @@ app.include_router(health_router)
 # Set up dependency injection for RAG engine
 def setup_dependencies():
     """Set up global dependencies for API routes."""
-    # Inject engine into chat router
-    setattr(chat_router.get_rag_engine, "engine", RAGEngine(
+    # Inject engine into the actual get_rag_engine function used by FastAPI Depends()
+    setattr(chat_get_rag_engine, "engine", RAGEngine(
         vector_store=vector_store,
         llm_client=llm_client,
         dep_graph=dep_graph,
     ))
-    
-    # Inject pipeline into repo router
-    setattr(repo_router.get_pipeline, "pipeline", pipeline)
-    
-    # Inject vector store into search router
-    setattr(search_router.get_vector_store, "store", vector_store)
 
 # Setup dependencies
 setup_dependencies()

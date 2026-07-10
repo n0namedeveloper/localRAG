@@ -48,15 +48,17 @@ class RepoManager:
     """
 
     def __init__(self):
+        self.settings = settings
         settings.repos_dir.mkdir(parents=True, exist_ok=True)
 
-    def get_repo(self, repo_url: str, branch: str = "main") -> tuple[Repo, Path, RepoStatus]:
+    def get_repo(self, repo_url: str, branch: str | None = None, github_token: str | None = None) -> tuple[Repo, Path, RepoStatus]:
         """
         Clone or pull a repository. Returns (Repo, repo_path, status).
 
         Args:
             repo_url: GitHub URL.
-            branch: Branch to checkout.
+            branch: Branch to checkout. If None, uses default branch.
+            github_token: Optional GitHub PAT for private repos.
 
         Returns:
             Tuple of (git.Repo object, local path, status enum).
@@ -64,25 +66,49 @@ class RepoManager:
         repo_path = _get_repo_path(repo_url)
 
         if repo_path.exists():
-            return self._update_repo(repo_path, branch)
+            # If no branch specified, we'll use the repo's current head
+            effective_branch = branch or repo_path.joinpath(".git/HEAD").read_text().strip().split("/")[-1] if repo_path.joinpath(".git/HEAD").exists() else "main"
+            return self._update_repo(repo_path, effective_branch)
         else:
-            return self._clone_repo(repo_url, repo_path, branch)
+            return self._clone_repo(repo_url, repo_path, branch, github_token)
 
     def _clone_repo(
-        self, repo_url: str, repo_path: Path, branch: str
+        self, repo_url: str, repo_path: Path, branch: str | None = None, github_token: str | None = None
     ) -> tuple[Repo, Path, RepoStatus]:
         """Clone a fresh repository."""
         logger.info(f"Cloning {repo_url} → {repo_path}")
         try:
             clone_kwargs = {
-                "branch": branch,
                 "depth": 1,  # shallow clone for speed
+                "multi_options": ["--single-branch"],  # Only clone the specified branch
             }
-            repo = Repo.clone_from(repo_url, str(repo_path), **clone_kwargs)
+            if branch:
+                clone_kwargs["branch"] = branch
+            
+            # If no branch specified, we'll use ls-remote to find default branch
+            effective_url = repo_url
+            if github_token:
+                # Inject token into URL for authenticated clone
+                effective_url = repo_url.replace(
+                    "https://github.com/",
+                    f"https://{github_token}:x-oauth-basic@github.com/"
+                )
+                logger.info("Using authenticated git URL")
+            
+            repo = Repo.clone_from(effective_url, str(repo_path), **clone_kwargs)
             logger.info(f"Clone complete: {repo_path}")
             return repo, repo_path, RepoStatus.READY
+            
         except GitCommandError as e:
+            error_msg = str(e)
             logger.error(f"Clone failed: {e}")
+            
+            # Provide helpful error messages based on the error type
+            if "could not read Username" in error_msg or "Authentication failed" in error_msg:
+                logger.error("Authentication failed. If this is a private repository, make sure GITHUB_TOKEN is set in your .env file")
+            elif "Remote branch" in error_msg and "not found" in error_msg:
+                logger.error(f"Branch '{branch}' not found. Try without specifying a branch to use the default branch, or verify the branch name")
+            
             # Cleanup partial clone
             if repo_path.exists():
                 import shutil

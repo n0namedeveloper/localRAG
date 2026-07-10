@@ -6,7 +6,6 @@ from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from sse_starlette.sse import EventSourceResponse
 
 from app.models.schemas import ChatRequest, ChatResponse
 from app.core.rag_engine import RAGEngine
@@ -61,19 +60,15 @@ async def chat_stream(
       - event: "sources", data: JSON with sources array
       - event: "done", data: "true"
     """
-    async def event_generator():
+    async def event_generator() -> AsyncGenerator[str, None]:
         full_answer = ""
         try:
             async for token in engine.answer_stream(request):
                 full_answer += token
-                yield {
-                    "event": "token",
-                    "data": token,
-                }
+                payload = json.dumps({"event": "token", "data": token}, ensure_ascii=False)
+                yield f"data: {payload}\n\n"
 
-            # After streaming completes, parse sources from the last yield
-            # (sources are embedded in the final token as HTML comment)
-            # For simplicity, we regenerate sources here
+            # After streaming completes, regenerate sources
             sources = engine._extract_sources(
                 full_answer,
                 engine._retrieve_chunks(
@@ -82,25 +77,26 @@ async def chat_stream(
                     top_k=request.max_chunks,
                 ),
             )
-            repo_name = engine._extract_repo_name(request.repo_url)
             for source in sources:
                 source.github_url = engine._build_github_url(
                     request.repo_url, source.file_path, source.start_line
                 )
 
-            yield {
-                "event": "sources",
-                "data": json.dumps(
-                    [s.model_dump() for s in sources], default=str
-                ),
-            }
-            yield {"event": "done", "data": "true"}
+            payload = json.dumps(
+                {"event": "sources", "data": [s.model_dump() for s in sources]},
+                ensure_ascii=False,
+            )
+            yield f"data: {payload}\n\n"
+
+            payload = json.dumps({"event": "done", "data": "true"}, ensure_ascii=False)
+            yield f"data: {payload}\n\n"
 
         except Exception as e:
             logger.exception(f"Stream error: {e}")
-            yield {
-                "event": "error",
-                "data": json.dumps({"error": str(e)}),
-            }
+            payload = json.dumps({"event": "error", "data": {"error": str(e)}}, ensure_ascii=False)
+            yield f"data: {payload}\n\n"
 
-    return EventSourceResponse(event_generator())
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+    )

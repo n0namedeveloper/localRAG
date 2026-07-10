@@ -12,11 +12,6 @@ services:
     restart: unless-stopped
     environment:
       - QDRANT__SERVICE__GRPC_PORT=6334
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   api:
     build:
@@ -28,11 +23,17 @@ services:
     volumes:
       - ./data:/app/data
       - ./grammars:/app/grammars
+      - ./data/hf_cache:/root/.cache/huggingface
     env_file:
       - .env
+    environment:
+      - HF_HOME=/root/.cache/huggingface
+      - SENTENCE_TRANSFORMERS_HOME=/root/.cache/huggingface
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     depends_on:
-      qdrant:
-        condition: service_healthy
+      - qdrant
     restart: unless-stopped
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
@@ -48,6 +49,8 @@ services:
       - ./data:/app/data
     env_file:
       - .env
+    environment:
+      - BACKEND_URL=http://api:8000
     depends_on:
       - api
     restart: unless-stopped
