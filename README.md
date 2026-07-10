@@ -1,10 +1,6 @@
 # 🤖 CodeRAG: Chat with GitHub Repositories
 
-**Chat with your GitHub repositories using Retrieval-Augmented Generation (RAG) and code-aware context.**
-
-This project enables you to ask natural language questions about any GitHub repository and get precise answers with source code references. It's designed for onboarding new developers and understanding complex codebases quickly.
-
----
+Chat with your GitHub repositories using Retrieval-Augmented Generation (RAG) and code-aware context. This project enables you to ask natural language questions about any GitHub repository and get precise answers with source code references.
 
 ## 🔍 Features
 
@@ -16,8 +12,6 @@ This project enables you to ask natural language questions about any GitHub repo
 - **Multi-Language Support**: Works with Python, JavaScript, TypeScript, Java, Go, and more
 - **FastAPI Backend**: RESTful API with streaming support
 - **Streamlit UI**: Interactive web interface
-
----
 
 ## 🏗️ Architecture
 
@@ -54,8 +48,6 @@ graph TD
    - Qdrant for vector storage
    - Docker for containerization
 
----
-
 ## 🛠️ Tech Stack
 
 | Layer       | Technology         |
@@ -68,8 +60,6 @@ graph TD
 | LLM         | DeepSeek V4        |
 | Container   | Docker             |
 
----
-
 ## 🚀 Quick Start
 
 ### Prerequisites
@@ -77,13 +67,14 @@ graph TD
 - Docker & Docker Compose
 - Python 3.9+
 - Git
+- Node.js (for frontend, if needed)
 
 ### Installation
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/coderg.git
-cd coderg
+git clone https://github.com/n0namedeveloper/localRAG.git
+cd localRAG
 ```
 
 2. Copy environment file:
@@ -100,9 +91,7 @@ docker-compose up --build
    - Backend API: http://localhost:8000
    - Streamlit UI: http://localhost:8501
 
----
-
-## 📦 Project Structure
+## 📁 Project Structure
 
 ```
 .
@@ -111,22 +100,21 @@ docker-compose up --build
 │   │   ├── api/             # API endpoints
 │   │   ├── core/            # Core logic (RAG, LLM, embedding, vector store)
 │   │   ├── ingestion/       # Ingestion pipeline
-│   │   ├── models/          # Pydantic models
-│   │   └── main.py          # FastAPI app entrypoint
+│   │   └── models/         # Pydantic models
 │   └── requirements.txt
 ├── frontend/                # Streamlit UI
 │   └── streamlit_app.py
 ├── data/                    # Data storage
 │   ├── qdrant_storage/      # Qdrant persistent storage
-│   └── repos/               # Cloned repositories
-├── grammars/                # tree-sitter language grammars
+│   └── repos/              # Cloned repositories
 ├── docker-compose.yml
 ├── Dockerfile
 ├── Dockerfile.ui
+├── requirements.txt
+├── temp_openapi.json
+├── TESTING_GUIDE.md
 └── README.md
 ```
-
----
 
 ## 🧠 How It Works
 
@@ -145,22 +133,25 @@ docker-compose up --build
    - Parse answer for source references
 
 3. **Response Format**
-   ```json
-   {
-     "answer": "The auth function checks JWT token validity...",
-     "sources": [
-       {
-         "file_path": "auth/utils.py",
-         "start_line": 42,
-         "end_line": 55,
-         "symbol_name": "validate_token",
-         "github_url": "https://github.com/user/repo/blob/main/auth/utils.py#L42"
-       }
-     ]
-   }
-   ```
-
----
+```json
+{
+  "answer": "The auth function checks JWT token validity...",
+  "sources": [
+    {
+      "file_path": "auth/utils.py",
+      "start_line": 42,
+      "end_line": 55,
+      "symbol_name": "validate_token",
+      "symbol_type": "function",
+      "snippet": "def login_user(username, password):",
+      "relevance_score": 0.95,
+      "github_url": "https://github.com/user/repo/blob/main/auth/login.py#L42"
+    }
+  ],
+  "repo_name": "user/repo",
+  "question": "How does authorization work?"
+}
+```
 
 ## 📡 API Endpoints
 
@@ -179,8 +170,6 @@ docker-compose up --build
 ### Health
 - `GET /api/health` - Service health check
 
----
-
 ## 🎯 Example Usage
 
 1. Enter a GitHub repo URL in the sidebar
@@ -195,49 +184,32 @@ docker-compose up --build
    - Code snippets
    - GitHub permalinks to source
 
----
-
 ## ⚙️ Configuration
 
 Edit `.env` file:
 
 ```env
-# Backend settings
-HOST=0.0.0.0
-PORT=8000
-DEBUG=false
-RELOAD=true
-ALLOWED_ORIGINS=http://localhost:8501,http://localhost:3000
+# DeepSeek API (via OpenRouter or direct DeepSeek API)
+DEEPSEEK_API_KEY=your_api_key_here
+DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
+DEEPSEEK_MODEL=deepseek-chat
 
-# Qdrant settings
-QDRANT_HOST=qdrant
+# Qdrant
+QDRANT_HOST=localhost
 QDRANT_PORT=6333
 
-# LLM settings
-DEEPSEEK_API_KEY=your_api_key_here
-EMBEDDING_MODEL=thenlper/gte-small
+# Application
+DATA_DIR=./data
+MAX_CHUNKS_PER_QUERY=15
+LOG_LEVEL=INFO
 ```
-
----
 
 ## 🧪 Testing
 
 Run tests:
 ```bash
-cd backend
-python -m pytest tests/
+python tests/test_system_structure.py
 ```
-
----
-
-## 📈 Performance Notes
-
-- **Indexing**: ~10-30s per 1000 files
-- **Query Time**: ~200-500ms for 15 chunks
-- **Memory**: 2GB+ for large repos
-- **Storage**: 100MB per 1000 files (Qdrant)
-
----
 
 ## 🤝 Contributing
 
@@ -247,14 +219,9 @@ python -m pytest tests/
 4. Push to the branch
 5. Create a new Pull Request
 
----
-
 ## 📄 License
 
 Distributed under the MIT License. See [LICENSE](LICENSE).
-
-
----
 
 ## 🙏 Acknowledgements
 
