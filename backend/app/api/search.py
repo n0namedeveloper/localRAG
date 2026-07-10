@@ -1,10 +1,11 @@
 """Search API endpoint — direct vector search without RAG."""
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException
 from typing import List
 
-from app.models.schemas import SearchRequest, SearchResult, ChunkMetadata
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from app.models.schemas import SearchRequest, SearchResult
 from app.core.vector_store import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -12,9 +13,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/search", tags=["search"])
 
 
-def get_vector_store() -> VectorStore:
-    """Dependency injection for vector store."""
-    store = getattr(get_vector_store, "store", None)
+def get_vector_store(request: Request) -> VectorStore:
+    """Dependency: retrieve vector store from app.state."""
+    store = getattr(request.app.state, "vector_store", None)
     if store is None:
         raise HTTPException(status_code=503, detail="Vector store not initialized")
     return store
@@ -38,10 +39,8 @@ async def search(
         }
     """
     try:
-        repo_name = request.repo_url.split("/")[-1].replace(".git", "")
-        if "@" in repo_name:
-            repo_name = repo_name.split("@")[0]
-
+        # Extract bare repo name from URL for filtering
+        repo_name = request.repo_url.rstrip("/").rstrip(".git").split("/")[-1]
         results = vector_store.search(
             query=request.query,
             repo_name=repo_name,
@@ -50,16 +49,10 @@ async def search(
             language=request.language,
             symbol_type=request.symbol_type,
         )
-
-        # Convert to SearchResult format
-        search_results = []
-        for metadata, score in results:
-            search_results.append(SearchResult(
-                metadata=metadata,
-                score=score,
-            ))
-
-        return search_results
+        return [
+            SearchResult(metadata=metadata, score=score)
+            for metadata, score in results
+        ]
     except Exception as e:
-        logger.exception(f"Search error: {e}")
+        logger.exception("Search error")
         raise HTTPException(status_code=500, detail=str(e))

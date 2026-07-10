@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     host: str = "0.0.0.0"
     port: int = 8000
-    reload: bool = True
+    reload: bool = False  # off by default; enable via .env for dev
     debug: bool = False
 
     # Local model name (for sentence-transformers)
