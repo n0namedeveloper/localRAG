@@ -43,10 +43,7 @@ services:
       dockerfile: Dockerfile.ui
     container_name: localrag-ui
     ports:
-      - "8501:8501"
-    volumes:
-      - ./frontend:/app/frontend
-      - ./data:/app/data
+      - "3000:80"
     env_file:
       - .env
     environment:
@@ -54,4 +51,3 @@ services:
     depends_on:
       - api
     restart: unless-stopped
-    command: streamlit run frontend/streamlit_app.py --server.port 8501 --server.address 0.0.0.0

@@ -166,3 +166,58 @@ class HealthResponse(BaseModel):
     status: str = "ok"
     qdrant: str = "connected"
     version: str = "0.1.0"
+
+
+# ─── Graph Models ────────────────────────────────────────────────
+
+class GraphNodeData(BaseModel):
+    name: str
+    symbol_type: str
+    file_path: str
+    parent_class: str | None = None
+
+
+class GraphNode(BaseModel):
+    id: str
+    data: GraphNodeData
+
+
+class GraphEdge(BaseModel):
+    id: str
+    source: str
+    target: str
+    label: str
+    weight: float = 1.0
+
+
+class GraphDataResponse(BaseModel):
+    repo_name: str
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+
+
+# ─── Log Models ────────────────────────────────────────────────────
+
+class LogEntry(BaseModel):
+    timestamp: str
+    level: str
+    message: str
+    repo_name: str | None = None
+    stage: str | None = None
+
+
+class RepoStatsResponse(BaseModel):
+    repo_name: str
+    status: str
+    files_parsed: int = 0
+    symbols_count: int = 0
+    chunks_count: int = 0
+    graph_nodes: int = 0
+    graph_edges: int = 0
+    duration_sec: float = 0.0
+    last_indexed: datetime | None = None
+    languages: dict[str, int] = Field(default_factory=dict)
+
+
+class RepoListResponse(BaseModel):
+    repos: list[RepoStatsResponse]

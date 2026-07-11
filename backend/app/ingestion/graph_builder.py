@@ -225,3 +225,31 @@ class DependencyGraph:
             if data.get("dep_type") == DependencyType.CALL.value:
                 callees.append(target)
         return callees
+
+    def to_export_format(self, repo_name: str | None = None) -> dict:
+        """
+        Export graph as nodes/edges for frontend visualization.
+        """
+        nodes = []
+        edges = []
+        for node_id in self.graph.nodes():
+            node_data = self.graph.nodes[node_id]
+            nodes.append({
+                "id": node_id,
+                "data": {
+                    "name": node_data.get("name", ""),
+                    "symbol_type": node_data.get("symbol_type", "unknown"),
+                    "file_path": node_data.get("file_path", ""),
+                    "parent_class": node_data.get("parent_class"),
+                }
+            })
+        for source, target, edge_data in self.graph.edges(data=True):
+            dep_type = edge_data.get("dep_type", "unknown")
+            edges.append({
+                "id": f"{source}__{target}",
+                "source": source,
+                "target": target,
+                "label": dep_type,
+                "weight": edge_data.get("weight", 1.0),
+            })
+        return {"repo_name": repo_name or "unknown", "nodes": nodes, "edges": edges}

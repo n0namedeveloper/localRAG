@@ -27,6 +27,8 @@ from app.api.chat import router as chat_router
 from app.api.repo import router as repo_router
 from app.api.search import router as search_router
 from app.api.health import router as health_router
+from app.api.graph import router as graph_router
+from app.api.logs import router as logs_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -77,7 +79,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -87,6 +89,8 @@ app.include_router(chat_router)
 app.include_router(repo_router)
 app.include_router(search_router)
 app.include_router(health_router)
+app.include_router(graph_router)
+app.include_router(logs_router)
 
 
 @app.get("/")
