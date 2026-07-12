@@ -89,134 +89,143 @@ class IngestionPipeline:
         repo_index_dir = INDEX_DIR / repo_name
         repo_index_dir.mkdir(parents=True, exist_ok=True)
 
-        repo, repo_path, status = self.repo_manager.get_repo(
-            repo_url, branch, github_token=settings.github_token
-        )
-        if status == RepoStatus.ERROR:
-            self._update_state(repo_name, "error")
-            return {
-                "repo_name": repo_name,
-                "status": "error",
-                "error": "Failed to clone repository",
-            }
-
-        # Detect the actual branch that was checked out
         try:
-            actual_branch = repo.active_branch.name
-        except Exception:
-            actual_branch = branch or "main"
-        branch = actual_branch
+            repo, repo_path, status = self.repo_manager.get_repo(
+                repo_url, branch, github_token=settings.github_token
+            )
+            if status == RepoStatus.ERROR:
+                self._update_state(repo_name, "error", {"error": "Failed to clone repository"})
+                return {
+                    "repo_name": repo_name,
+                    "status": "error",
+                    "error": "Failed to clone repository",
+                }
 
-        # ── Step 1: List source files ──
-        self._update_state(repo_name, "scanning")
-        source_files = self.repo_manager.list_source_files(repo_path)
-        if not source_files:
-            logger.warning(f"No supported source files found in {repo_path}")
-            self._update_state(repo_name, "ready")
+            # Detect the actual branch that was checked out
+            try:
+                actual_branch = repo.active_branch.name
+            except Exception:
+                actual_branch = branch or "main"
+            branch = actual_branch
+
+            # ── Step 1: List source files ──
+            self._update_state(repo_name, "scanning")
+            source_files = self.repo_manager.list_source_files(repo_path)
+            if not source_files:
+                logger.warning(f"No supported source files found in {repo_path}")
+                self._update_state(repo_name, "ready")
+                return {
+                    "repo_name": repo_name,
+                    "status": "ready",
+                    "files_parsed": 0,
+                    "symbols_count": 0,
+                    "chunks_count": 0,
+                    "graph_nodes": 0,
+                    "graph_edges": 0,
+                    "duration_sec": time.time() - start_time,
+                }
+
+            # ── Step 2: Parse all files ──
+            self._update_state(repo_name, "parsing")
+            all_symbols: list[ParsedSymbol] = []
+            for file_path in source_files:
+                try:
+                    source = file_path.read_bytes()
+                    rel_path = file_path.relative_to(repo_path)
+                    symbols = self.parser.parse_file(
+                        rel_path, source, repo_name, repo_url, branch
+                    )
+                    all_symbols.extend(symbols)
+                except Exception as e:
+                    logger.warning(f"Failed to parse {file_path}: {e}")
+
+            logger.info(f"Parsed {len(all_symbols)} symbols from {len(source_files)} files")
+
+            # ── Step 3: Chunk symbols ──
+            self._update_state(repo_name, "chunking")
+            chunks = self.chunker.chunk_all(all_symbols)
+            logger.info(f"Generated {len(chunks)} chunks")
+
+            # ── Step 4: Delete old data for this repo (if re-indexing) ──
+            if force_reindex:
+                self.vector_store.delete_repo(repo_name)
+
+            # ── Step 5: Embed and index into Qdrant ──
+            self._update_state(repo_name, "indexing")
+            indexed_result = self.vector_store.index_chunks(chunks)
+            # indexed_result is an UpdateResult object; use the number of chunks provided as the count
+            indexed_count = len(chunks)
+            logger.info(f"Indexed {indexed_count} chunks into Qdrant")
+
+            # ── Step 6: Build dependency graph ──
+            self._update_state(repo_name, "building_graph")
+            graph = self.dep_graph.build(all_symbols)
+            logger.info(
+                f"Graph built: {graph.number_of_nodes()} nodes, "
+                f"{graph.number_of_edges()} edges"
+            )
+
+            # ── Step 7: Save state and meta.json for Dashboard ──
+            duration = time.time() - start_time
+            meta = {
+                "repo_name": repo_name,
+                "repo_url": repo_url,
+                "branch": branch,
+                "files_parsed": len(source_files),
+                "symbols_count": len(all_symbols),
+                "chunks_count": len(chunks),
+                "graph_nodes": graph.number_of_nodes(),
+                "graph_edges": graph.number_of_edges(),
+                "duration_sec": round(duration, 2),
+                "last_indexed": datetime.utcnow().isoformat(),
+            }
+            self._update_state(repo_name, "ready", meta)
+
+            # Write meta.json so /api/repo/list can discover this repo
+            repo_index_dir = INDEX_DIR / repo_name
+            repo_index_dir.mkdir(parents=True, exist_ok=True)
+            (repo_index_dir / "meta.json").write_text(
+                json.dumps(meta, indent=2, default=str)
+            )
+
+            # Save graph.json for /api/graph/:repo_name
+            graph_data = {
+                "repo_name": repo_name,
+                "nodes": [
+                    {"id": str(n), "data": graph.nodes[n]}
+                    for n in graph.nodes
+                ],
+                "edges": [
+                    {"id": f"{u}->{v}", "source": str(u), "target": str(v),
+                     "label": str(graph.edges[u, v].get("dep_type", "depends")),
+                     "weight": float(graph.edges[u, v].get("weight", 1.0))}
+                    for u, v in graph.edges
+                ],
+            }
+            (repo_index_dir / "graph.json").write_text(
+                json.dumps(graph_data, indent=2, default=str)
+            )
+
+            logger.info(f"✅ Ingestion complete for {repo_url} in {duration:.1f}s")
+
             return {
                 "repo_name": repo_name,
                 "status": "ready",
-                "files_parsed": 0,
-                "symbols_count": 0,
-                "chunks_count": 0,
-                "graph_nodes": 0,
-                "graph_edges": 0,
-                "duration_sec": time.time() - start_time,
+                "files_parsed": len(source_files),
+                "symbols_count": len(all_symbols),
+                "chunks_count": len(chunks),
+                "graph_nodes": graph.number_of_nodes(),
+                "graph_edges": graph.number_of_edges(),
+                "duration_sec": round(duration, 2),
             }
-
-        # ── Step 2: Parse all files ──
-        self._update_state(repo_name, "parsing")
-        all_symbols: list[ParsedSymbol] = []
-        for file_path in source_files:
-            try:
-                source = file_path.read_bytes()
-                rel_path = file_path.relative_to(repo_path)
-                symbols = self.parser.parse_file(
-                    rel_path, source, repo_name, repo_url, branch
-                )
-                all_symbols.extend(symbols)
-            except Exception as e:
-                logger.warning(f"Failed to parse {file_path}: {e}")
-
-        logger.info(f"Parsed {len(all_symbols)} symbols from {len(source_files)} files")
-
-        # ── Step 3: Chunk symbols ──
-        self._update_state(repo_name, "chunking")
-        chunks = self.chunker.chunk_all(all_symbols)
-        logger.info(f"Generated {len(chunks)} chunks")
-
-        # ── Step 4: Delete old data for this repo (if re-indexing) ──
-        if force_reindex:
-            self.vector_store.delete_repo(repo_name)
-
-        # ── Step 5: Embed and index into Qdrant ──
-        self._update_state(repo_name, "indexing")
-        indexed_result = self.vector_store.index_chunks(chunks)
-        # indexed_result is an UpdateResult object; use the number of chunks provided as the count
-        indexed_count = len(chunks)
-        logger.info(f"Indexed {indexed_count} chunks into Qdrant")
-
-        # ── Step 6: Build dependency graph ──
-        self._update_state(repo_name, "building_graph")
-        graph = self.dep_graph.build(all_symbols)
-        logger.info(
-            f"Graph built: {graph.number_of_nodes()} nodes, "
-            f"{graph.number_of_edges()} edges"
-        )
-
-        # ── Step 7: Save state and meta.json for Dashboard ──
-        duration = time.time() - start_time
-        meta = {
-            "repo_name": repo_name,
-            "repo_url": repo_url,
-            "branch": branch,
-            "files_parsed": len(source_files),
-            "symbols_count": len(all_symbols),
-            "chunks_count": len(chunks),
-            "graph_nodes": graph.number_of_nodes(),
-            "graph_edges": graph.number_of_edges(),
-            "duration_sec": round(duration, 2),
-            "last_indexed": datetime.utcnow().isoformat(),
-        }
-        self._update_state(repo_name, "ready", meta)
-
-        # Write meta.json so /api/repo/list can discover this repo
-        repo_index_dir = INDEX_DIR / repo_name
-        repo_index_dir.mkdir(parents=True, exist_ok=True)
-        (repo_index_dir / "meta.json").write_text(
-            json.dumps(meta, indent=2, default=str)
-        )
-
-        # Save graph.json for /api/graph/:repo_name
-        graph_data = {
-            "repo_name": repo_name,
-            "nodes": [
-                {"id": str(n), "data": graph.nodes[n]}
-                for n in graph.nodes
-            ],
-            "edges": [
-                {"id": f"{u}->{v}", "source": str(u), "target": str(v),
-                 "label": str(graph.edges[u, v].get("dep_type", "depends")),
-                 "weight": float(graph.edges[u, v].get("weight", 1.0))}
-                for u, v in graph.edges
-            ],
-        }
-        (repo_index_dir / "graph.json").write_text(
-            json.dumps(graph_data, indent=2, default=str)
-        )
-
-        logger.info(f"✅ Ingestion complete for {repo_url} in {duration:.1f}s")
-
-        return {
-            "repo_name": repo_name,
-            "status": "ready",
-            "files_parsed": len(source_files),
-            "symbols_count": len(all_symbols),
-            "chunks_count": len(chunks),
-            "graph_nodes": graph.number_of_nodes(),
-            "graph_edges": graph.number_of_edges(),
-            "duration_sec": round(duration, 2),
-        }
+        except Exception as e:
+            logger.exception(f"Fatal error during ingestion of {repo_url}")
+            self._update_state(repo_name, "error", {"error": str(e)})
+            return {
+                "repo_name": repo_name,
+                "status": "error",
+                "error": str(e)
+            }
 
     def get_repo_status(self, repo_url: str) -> RepoStatus:
         """Get the current status of a repository."""

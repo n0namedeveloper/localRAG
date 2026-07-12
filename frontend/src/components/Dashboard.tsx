@@ -47,7 +47,7 @@ export const Dashboard: React.FC = () => {
       const res = await fetch('/api/repo/clone', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo_url: repoUrl }),
+        body: JSON.stringify({ repo_url: repoUrl, force_reindex: true }),
       });
       if (res.ok) {
         setRepoUrl('');

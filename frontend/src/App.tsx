@@ -6,19 +6,22 @@ import { RepoDetail } from './components/RepoDetail';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { Logs } from './components/Logs';
 import { Layout } from './components/Layout';
+import { LogsProvider } from './contexts/LogsContext';
 
 function App() {
   return (
     <Router>
-      <Layout>
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/search" element={<Search />} />
-          <Route path="/chat" element={<Chat />} />
-          <Route path="/repos/:repoName" element={<RepoDetail />} />
-          <Route path="/logs" element={<Logs />} />
-        </Routes>
-      </Layout>
+      <LogsProvider>
+        <Layout>
+          <Routes>
+            <Route path="/" element={<Dashboard />} />
+            <Route path="/search" element={<Search />} />
+            <Route path="/chat" element={<Chat />} />
+            <Route path="/repos/:repoName" element={<RepoDetail />} />
+            <Route path="/logs" element={<Logs />} />
+          </Routes>
+        </Layout>
+      </LogsProvider>
     </Router>
   );
 }

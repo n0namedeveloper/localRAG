@@ -36,6 +36,29 @@ export const Chat: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    if (selectedRepo) {
+      const saved = localStorage.getItem(`chat_${selectedRepo}`);
+      if (saved) {
+        try {
+          setMessages(JSON.parse(saved));
+        } catch (e) {
+          setMessages([]);
+        }
+      } else {
+        setMessages([]);
+      }
+    }
+  }, [selectedRepo]);
+
+  useEffect(() => {
+    if (selectedRepo && messages.length > 0) {
+      localStorage.setItem(`chat_${selectedRepo}`, JSON.stringify(messages));
+    } else if (selectedRepo && messages.length === 0) {
+      localStorage.removeItem(`chat_${selectedRepo}`);
+    }
+  }, [messages, selectedRepo]);
+
+  useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isStreaming]);
 

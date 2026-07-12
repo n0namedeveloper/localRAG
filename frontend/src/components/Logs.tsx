@@ -1,46 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
-
-interface Log {
-  timestamp: string;
-  level: string;
-  message: string;
-  repo_name?: string;
-  stage?: string;
-  logger?: string;
-}
+import React, { useEffect, useRef } from 'react';
+import { useLogs } from '../contexts/LogsContext';
 
 export const Logs: React.FC = () => {
-  const [logs, setLogs] = useState<Log[]>([]);
-  const [isConnected, setIsConnected] = useState(false);
+  const { logs } = useLogs();
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
-
-  useEffect(() => {
-    let eventSource: EventSource;
-
-    const connect = () => {
-      eventSource = new EventSource('/api/logs/stream');
-      eventSource.onmessage = (event) => {
-        const log: Log = JSON.parse(event.data);
-        setLogs(prev => [...prev, log]);
-      };
-      eventSource.onerror = () => {
-        eventSource.close();
-        setIsConnected(false);
-      };
-      setIsConnected(true);
-    };
-
-    connect();
-    return () => {
-      if (eventSource) {
-        eventSource.close();
-      }
-    };
-  }, []);
 
   return (
     <div style={{ padding: '40px', height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -62,10 +29,10 @@ export const Logs: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
             <span style={{ 
               width: 8, height: 8, borderRadius: '50%', 
-              background: isConnected ? 'var(--status-ready)' : 'var(--status-error)' 
+              background: 'var(--status-ready)' 
             }} />
-            <span style={{ color: isConnected ? 'var(--status-ready)' : 'var(--status-error)' }}>
-              {isConnected ? 'Connected' : 'Disconnected'}
+            <span style={{ color: 'var(--status-ready)' }}>
+              Live Stream
             </span>
           </div>
         </div>

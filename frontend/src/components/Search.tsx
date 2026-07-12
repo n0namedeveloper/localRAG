@@ -25,12 +25,18 @@ export const Search: React.FC = () => {
       });
       const data: any[] = await response.json();
 
-      setResults(data.map((result: any) => ({
+      const rawResults = data.map((result: any) => ({
         file_path: result.metadata?.file_path ?? '',
         start_line: result.metadata?.start_line ?? 0,
         end_line: result.metadata?.end_line ?? 0,
         snippet: result.metadata?.signature || result.metadata?.symbol_name || '',
-      })));
+      }));
+
+      const uniqueResults = rawResults.filter((v, i, a) => 
+        a.findIndex(t => (t.file_path === v.file_path && t.start_line === v.start_line)) === i
+      );
+
+      setResults(uniqueResults);
     } catch (err) {
       console.error('Search error:', err);
       setResults([]);
