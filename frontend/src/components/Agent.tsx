@@ -46,26 +46,7 @@ export const Agent: React.FC = () => {
         done = readerDone;
         if (value) {
           const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split('\n');
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const dataStr = line.slice(6);
-              if (dataStr.trim()) {
-                try {
-                  const event = JSON.parse(dataStr);
-                  if (event.event === 'token') {
-                    setPlan(prev => prev + event.data);
-                  } else if (event.event === 'done') {
-                    done = true;
-                  } else if (event.event === 'error') {
-                    setPlan(prev => prev + "\n\n**Error:** " + event.data.error);
-                  }
-                } catch (e) {
-                  console.error("Parse error", e);
-                }
-              }
-            }
-          }
+          setPlan(prev => prev + chunk);
         }
       }
     } catch (err) {
