@@ -155,3 +155,7 @@ logs/
 
 # Docker
 .dockerignore
+# Custom
+node_modules/
+backend_logs.txt
+
