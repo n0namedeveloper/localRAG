@@ -172,7 +172,8 @@ export const Chat: React.FC<ChatProps> = ({ isSidePanel, repoOverride, externalQ
             value={selectedRepo}
             onChange={e => setSelectedRepo(e.target.value)}
           >
-            {repos.length === 0 ? <option value="">No repos available</option> : null}
+            <option value="all">All Repositories (Global Search)</option>
+            {repos.length === 0 ? <option value="" disabled>No repos available</option> : null}
             {repos.map(r => (
               <option key={r.repo_name} value={r.repo_name}>{r.repo_name}</option>
             ))}

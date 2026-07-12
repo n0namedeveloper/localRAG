@@ -5,7 +5,9 @@ const navItems = [
   { path: '/', label: 'Dashboard', icon: '◈' },
   { path: '/search', label: 'Search', icon: '⌕' },
   { path: '/chat', label: 'Chat', icon: '◎' },
+  { path: '/agent', label: 'Agent', icon: '⚡' },
   { path: '/logs', label: 'Logs', icon: '▤' },
+  { path: '/settings', label: 'Settings', icon: '⚙' },
 ];
 
 export const Layout: React.FC<{ children: React.ReactNode }> = ({ children }) => {

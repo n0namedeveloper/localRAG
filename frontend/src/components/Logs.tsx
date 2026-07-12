@@ -58,9 +58,7 @@ export const Logs: React.FC = () => {
                 <div key={i} style={{ 
                   display: 'flex', 
                   gap: 16, 
-                  marginBottom: 8, 
-                  paddingBottom: 8, 
-                  borderBottom: '1px solid var(--border-color)' 
+                  marginBottom: 8
                 }}>
                   <span style={{ color: 'var(--text-muted)', width: 80, flexShrink: 0 }}>{timeStr}</span>
                   <span style={{ 

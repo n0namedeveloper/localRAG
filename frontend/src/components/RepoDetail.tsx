@@ -9,6 +9,7 @@ interface APINode {
     name: string;
     symbol_type: string;
     file_path: string;
+    commit_count?: number;
   };
 }
 
@@ -17,6 +18,15 @@ interface APIEdge {
   source: string;
   target: string;
   label: string;
+}
+
+function getHotspotColor(count: number, max: number) {
+  if (count === 0) return '#3b3f54';
+  const ratio = Math.pow(count / max, 0.5); // non-linear for better visibility
+  const r = Math.round(59 + (239 - 59) * ratio);
+  const g = Math.round(63 + (68 - 63) * ratio);
+  const b = Math.round(84 + (68 - 84) * ratio);
+  return `rgb(${r}, ${g}, ${b})`;
 }
 
 export const RepoDetail: React.FC = () => {
@@ -29,6 +39,7 @@ export const RepoDetail: React.FC = () => {
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
   const [hoverNode, setHoverNode] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<any | null>(null);
+  const [showHotspots, setShowHotspots] = useState(false);
   
   const [externalQuery, setExternalQuery] = useState<ExternalQuery | null>(null);
 
@@ -67,6 +78,10 @@ export const RepoDetail: React.FC = () => {
       });
   }, [repoName]);
 
+  const maxCommitCount = useMemo(() => {
+    return Math.max(1, ...apiNodes.map(n => n.data.commit_count || 0));
+  }, [apiNodes]);
+
   const graphData = useMemo(() => {
     if (apiNodes.length === 0) return { nodes: [], links: [] };
 
@@ -80,13 +95,22 @@ export const RepoDetail: React.FC = () => {
 
     files.forEach(file => {
       const fileId = `file:${file}`;
+      const firstNodeInFile = apiNodes.find(n => n.data.file_path === file);
+      const commitCount = firstNodeInFile?.data.commit_count || 0;
+
+      let color = expandedFiles.has(file) ? '#3b3f54' : '#6366f1';
+      if (showHotspots) {
+        color = getHotspotColor(commitCount, maxCommitCount);
+      }
+
       finalNodes.set(fileId, {
         id: fileId,
         isFile: true,
         path: file,
         name: file.split(/[/\\]/).pop() || file,
-        val: 3,
-        color: expandedFiles.has(file) ? '#3b3f54' : '#6366f1',
+        val: showHotspots ? 3 + (commitCount / maxCommitCount) * 5 : 3,
+        color,
+        commitCount
       });
     });
 
@@ -94,9 +118,14 @@ export const RepoDetail: React.FC = () => {
       const file = node.data.file_path;
       if (expandedFiles.has(file)) {
         let color = '#8b5cf6';
-        if (node.data.symbol_type === 'class') color = '#ec4899';
-        else if (node.data.symbol_type === 'function' || node.data.symbol_type === 'method') color = '#0ea5e9';
-        else if (node.data.symbol_type === 'import') color = '#64748b';
+        if (showHotspots) {
+          const count = node.data.commit_count || 0;
+          color = getHotspotColor(count, maxCommitCount);
+        } else {
+          if (node.data.symbol_type === 'class') color = '#ec4899';
+          else if (node.data.symbol_type === 'function' || node.data.symbol_type === 'method') color = '#0ea5e9';
+          else if (node.data.symbol_type === 'import') color = '#64748b';
+        }
 
         finalNodes.set(node.id, {
           id: node.id,
@@ -106,6 +135,7 @@ export const RepoDetail: React.FC = () => {
           type: node.data.symbol_type,
           val: 1,
           color,
+          commitCount: node.data.commit_count || 0
         });
 
         const hubEdgeId = `hub:${node.id}->file:${file}`;
@@ -149,7 +179,7 @@ export const RepoDetail: React.FC = () => {
       nodes: Array.from(finalNodes.values()),
       links: Array.from(finalEdges.values())
     };
-  }, [apiNodes, apiEdges, expandedFiles]);
+  }, [apiNodes, apiEdges, expandedFiles, showHotspots, maxCommitCount]);
 
   const highlightedNodes = useMemo(() => {
     const set = new Set<string>();
@@ -203,7 +233,10 @@ export const RepoDetail: React.FC = () => {
     const isHovered = node.id === hoverNode || node.id === selectedNode?.id;
     const isDimmed = (hoverNode || selectedNode) && !isHighlighted;
     
-    const r = node.isFile ? (expandedFiles.has(node.path) ? 2 : 6) : 3;
+    let r = node.isFile ? (expandedFiles.has(node.path) ? 2 : 6) : 3;
+    if (showHotspots && node.isFile && !expandedFiles.has(node.path)) {
+      r += (node.commitCount / maxCommitCount) * 4;
+    }
     
     ctx.beginPath();
     ctx.arc(node.x, node.y, r, 0, 2 * Math.PI, false);
@@ -234,7 +267,7 @@ export const RepoDetail: React.FC = () => {
       
       ctx.fillText(label, node.x, textY);
     }
-  }, [highlightedNodes, hoverNode, selectedNode, expandedFiles]);
+  }, [highlightedNodes, hoverNode, selectedNode, expandedFiles, showHotspots, maxCommitCount]);
 
   const handleZoomIn = () => {
     const currentZoom = graphRef.current?.zoom();
@@ -268,7 +301,6 @@ export const RepoDetail: React.FC = () => {
         </div>
         
         <div ref={containerRef} style={{ flex: 1, background: 'var(--bg-primary)', overflow: 'hidden' }} onClick={(e) => {
-          // Deselect node if clicking on empty canvas
           if (e.target instanceof HTMLCanvasElement && !hoverNode) {
             setSelectedNode(null);
           }
@@ -316,31 +348,52 @@ export const RepoDetail: React.FC = () => {
         {/* Legend Panel */}
         <div className="glass-card fade-in" style={{ position: 'absolute', bottom: 24, left: 24, padding: '16px', display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13, background: 'var(--bg-card)' }}>
           <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Legend</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#6366f1', fontSize: 16 }}>●</span> File (Collapsed)</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#3b3f54', fontSize: 16 }}>●</span> File (Expanded)</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#ec4899', fontSize: 16 }}>●</span> Class</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#0ea5e9', fontSize: 16 }}>●</span> Function / Method</div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#64748b', fontSize: 16 }}>●</span> Import / Other</div>
+          {!showHotspots ? (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#6366f1', fontSize: 16 }}>●</span> File (Collapsed)</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#3b3f54', fontSize: 16 }}>●</span> File (Expanded)</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#ec4899', fontSize: 16 }}>●</span> Class</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#0ea5e9', fontSize: 16 }}>●</span> Function / Method</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#64748b', fontSize: 16 }}>●</span> Import / Other</div>
+            </>
+          ) : (
+            <>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#ef4444', fontSize: 16 }}>●</span> High Git Churn</div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#3b3f54', fontSize: 16 }}>●</span> Low Git Churn</div>
+            </>
+          )}
         </div>
 
         {/* Controls Panel */}
         <div style={{ position: 'absolute', bottom: 24, right: 24, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <button className="glass-card" style={{ width: 40, height: 40, color: 'white', cursor: 'pointer', background: 'var(--bg-card)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }} onClick={handleZoomIn}>+</button>
-          <button className="glass-card" style={{ width: 40, height: 40, color: 'white', cursor: 'pointer', background: 'var(--bg-card)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }} onClick={handleZoomOut}>-</button>
-          <button className="glass-card" style={{ width: 40, height: 40, color: 'white', cursor: 'pointer', background: 'var(--bg-card)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }} onClick={handleZoomFit}>⌖</button>
+          <button 
+            className="glass-card" 
+            style={{ padding: '8px 12px', color: showHotspots ? 'var(--accent-primary)' : 'white', cursor: 'pointer', background: 'var(--bg-card)', border: showHotspots ? '1px solid var(--accent-primary)' : '1px solid var(--border-color)', fontSize: 14, fontWeight: 600 }} 
+            onClick={() => setShowHotspots(!showHotspots)}
+          >
+            🔥 Git Hotspots
+          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="glass-card" style={{ width: 40, height: 40, color: 'white', cursor: 'pointer', background: 'var(--bg-card)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }} onClick={handleZoomIn}>+</button>
+            <button className="glass-card" style={{ width: 40, height: 40, color: 'white', cursor: 'pointer', background: 'var(--bg-card)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }} onClick={handleZoomOut}>-</button>
+            <button className="glass-card" style={{ width: 40, height: 40, color: 'white', cursor: 'pointer', background: 'var(--bg-card)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }} onClick={handleZoomFit}>⌖</button>
+          </div>
         </div>
 
         {/* Selected Node Details Tooltip overlay (in graph area) */}
         {selectedNode && (
-          <div className="glass-card fade-in" style={{ position: 'absolute', top: 80, right: 24, padding: '20px', width: '320px', background: 'var(--bg-card)', border: '1px solid var(--accent-primary)', boxShadow: 'var(--shadow-lg)' }}>
+          <div className="glass-card fade-in" style={{ position: 'absolute', top: 24, right: 24, padding: '20px', width: '320px', background: 'var(--bg-card)', border: '1px solid var(--accent-primary)', boxShadow: 'var(--shadow-lg)', zIndex: 50 }}>
             <div style={{ fontSize: 12, textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 4 }}>
               {selectedNode.isFile ? 'File' : selectedNode.type || 'Symbol'}
             </div>
             <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', wordBreak: 'break-all', marginBottom: 8 }}>
               {selectedNode.name}
             </div>
-            <div style={{ fontSize: 13, color: 'var(--text-secondary)', wordBreak: 'break-all', marginBottom: 20 }}>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', wordBreak: 'break-all', marginBottom: 8 }}>
               {selectedNode.path}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 20 }}>
+              Commits (90d): {selectedNode.commitCount || 0}
             </div>
             <button className="btn-primary" style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8 }} onClick={handleExplain}>
               <span>✨</span> Explain with AI

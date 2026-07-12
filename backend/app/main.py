@@ -29,6 +29,7 @@ from app.api.search import router as search_router
 from app.api.health import router as health_router
 from app.api.graph import router as graph_router
 from app.api.logs import router as logs_router, SSELoggingHandler
+from app.api.settings import router as settings_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -53,17 +54,14 @@ async def lifespan(app: FastAPI):
     embedding_provider = EmbeddingProvider()
     vector_store = VectorStore(embedding_provider=embedding_provider)
     dep_graph = DependencyGraph()
-    llm_client = DeepSeekClient()
     pipeline = IngestionPipeline(vector_store=vector_store, dep_graph=dep_graph)
     rag_engine = RAGEngine(
         vector_store=vector_store,
-        llm_client=llm_client,
         dep_graph=dep_graph,
     )
     repo_manager = RepoManager()
 
     app.state.vector_store = vector_store
-    app.state.llm_client = llm_client
     app.state.pipeline = pipeline
     app.state.rag_engine = rag_engine
     app.state.repo_manager = repo_manager
@@ -72,7 +70,6 @@ async def lifespan(app: FastAPI):
     yield
 
     logger.info("Shutting down CodeRAG API...")
-    await llm_client.aclose()
 
 
 app = FastAPI(
@@ -92,9 +89,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from app.api.agent import router as agent_router
+
 app.include_router(chat_router)
 app.include_router(repo_router)
 app.include_router(search_router)
+app.include_router(settings_router)
+app.include_router(agent_router)
 app.include_router(health_router)
 app.include_router(graph_router)
 app.include_router(logs_router)

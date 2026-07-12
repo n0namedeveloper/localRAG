@@ -276,6 +276,32 @@ class VectorStore:
             logger.error(f"Failed to delete repo {repo_name}: {e}")
             return 0
 
+    def delete_file_chunks(self, repo_name: str, file_path: str) -> int:
+        """Delete all chunks belonging to a specific file."""
+        try:
+            self.client.delete(
+                collection_name=self._collection_name,
+                points_selector=qdrant_models.FilterSelector(
+                    filter=qdrant_models.Filter(
+                        must=[
+                            qdrant_models.FieldCondition(
+                                key="repo_name",
+                                match=qdrant_models.MatchValue(value=repo_name),
+                            ),
+                            qdrant_models.FieldCondition(
+                                key="file_path",
+                                match=qdrant_models.MatchValue(value=file_path),
+                            )
+                        ]
+                    )
+                ),
+            )
+            logger.debug(f"Deleted old chunks for {file_path} in repo {repo_name}")
+            return 1
+        except Exception as e:
+            logger.error(f"Failed to delete file {file_path} in {repo_name}: {e}")
+            return 0
+
     def count_chunks(self, repo_name: str | None = None) -> int:
         """Count chunks, optionally filtered by repo."""
         if repo_name:

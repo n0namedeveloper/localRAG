@@ -187,3 +187,22 @@ class RepoManager:
     def repo_exists(self, repo_url: str) -> bool:
         """Check if a repo is already cloned."""
         return _get_repo_path(repo_url).exists()
+
+    def get_git_hotspots(self, repo_path: Path, days: int = 90) -> dict[str, int]:
+        """Get commit count per file over the last N days."""
+        import subprocess
+        hotspots = {}
+        try:
+            result = subprocess.run(
+                ["git", "log", f"--since={days} days ago", "--name-only", "--format="],
+                cwd=str(repo_path),
+                capture_output=True,
+                text=True,
+            )
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if line:
+                    hotspots[line] = hotspots.get(line, 0) + 1
+        except Exception as e:
+            logger.warning(f"Failed to get git hotspots: {e}")
+        return hotspots

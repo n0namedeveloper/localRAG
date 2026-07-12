@@ -41,11 +41,9 @@ class RAGEngine:
     def __init__(
         self,
         vector_store: VectorStore,
-        llm_client: DeepSeekClient,
         dep_graph: DependencyGraph,
     ):
         self.vector_store = vector_store
-        self.llm = llm_client
         self.dep_graph = dep_graph
 
     def answer(self, request: ChatRequest) -> ChatResponse:
@@ -65,7 +63,11 @@ class RAGEngine:
         )
         enriched = self._enrich_with_graph(chunks, hops=settings.max_graph_hops)
         prompt = self._build_prompt(request.question, enriched)
-        answer_text = self.llm.chat(
+        
+        from app.core.llm_client import get_llm_client, SYSTEM_PROMPT
+        llm = get_llm_client()
+        
+        answer_text = llm.chat(
             messages=[{"role": "user", "content": prompt}],
             system_prompt=SYSTEM_PROMPT,
             temperature=0.2,
@@ -101,8 +103,11 @@ class RAGEngine:
         enriched = self._enrich_with_graph(chunks, hops=settings.max_graph_hops)
         prompt = self._build_prompt(request.question, enriched)
 
+        from app.core.llm_client import get_llm_client, SYSTEM_PROMPT
+        llm = get_llm_client()
+
         full_answer = ""
-        async for token in self.llm.chat_stream(
+        async for token in llm.chat_stream(
             messages=[{"role": "user", "content": prompt}],
             system_prompt=SYSTEM_PROMPT,
         ):
@@ -245,7 +250,7 @@ class RAGEngine:
 
     def _extract_repo_name(self, repo_url: str | None) -> str | None:
         """Extract owner/repo from GitHub URL."""
-        if not repo_url:
+        if not repo_url or repo_url.lower() == "all":
             return None
         m = re.search(r"github\.com[/:]([\w.-]+/[\w.-]+)", repo_url)
         if m:

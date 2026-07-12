@@ -1,16 +1,13 @@
-"""
-DeepSeek / OpenAI-compatible LLM client.
-Supports streaming SSE, system prompts, structured output.
-"""
-
 import json
 import logging
 from typing import AsyncGenerator
+from abc import ABC, abstractmethod
 
 import httpx
 from httpx import Timeout
 
-from app.config import settings
+from app.config import settings as env_settings
+from app.core.settings_manager import settings_manager
 
 logger = logging.getLogger(__name__)
 
@@ -33,20 +30,23 @@ RESPONSE STRUCTURE:
 4. Usage example (if applicable)"""
 
 
-class DeepSeekClient:
-    """
-    LLM client for DeepSeek (OpenAI-compatible).
+class BaseLLMClient(ABC):
+    @abstractmethod
+    def chat(self, messages: list[dict], system_prompt: str | None = None, temperature: float = 0.2, max_tokens: int = 4096) -> str:
+        pass
 
-    Supports:
-      - Synchronous chat completion
-      - Server-Sent Events streaming
-    """
+    @abstractmethod
+    async def chat_stream(self, messages: list[dict], system_prompt: str | None = None, temperature: float = 0.2, max_tokens: int = 4096) -> AsyncGenerator[str, None]:
+        pass
 
+
+class DeepSeekClient(BaseLLMClient):
     def __init__(self):
-        self.api_key = settings.deepseek_api_key
-        self.base_url = settings.deepseek_base_url.rstrip("/")
-        self.model = settings.deepseek_model
-        self.chat_completions_path = settings.deepseek_chat_completions_path.lstrip("/")
+        conf = settings_manager.get()
+        self.api_key = conf.deepseek_api_key or env_settings.deepseek_api_key
+        self.base_url = env_settings.deepseek_base_url.rstrip("/")
+        self.model = conf.deepseek_model
+        self.chat_completions_path = env_settings.deepseek_chat_completions_path.lstrip("/")
 
         self._http_client = httpx.Client(
             timeout=Timeout(60.0, connect=10.0, read=60.0),
@@ -68,19 +68,7 @@ class DeepSeekClient:
             return [{"role": "system", "content": system_prompt}] + messages
         return messages
 
-    def chat(
-        self,
-        messages: list[dict],
-        system_prompt: str | None = None,
-        temperature: float = 0.2,
-        max_tokens: int = 4096,
-    ) -> str:
-        """
-        Send a synchronous chat request.
-
-        Returns:
-            Response text string.
-        """
+    def chat(self, messages: list[dict], system_prompt: str | None = None, temperature: float = 0.2, max_tokens: int = 4096) -> str:
         payload = {
             "model": self.model,
             "messages": self._build_messages(messages, system_prompt),
@@ -104,19 +92,7 @@ class DeepSeekClient:
             logger.error("DeepSeek API call failed", exc_info=True)
             raise
 
-    async def chat_stream(
-        self,
-        messages: list[dict],
-        system_prompt: str | None = None,
-        temperature: float = 0.2,
-        max_tokens: int = 4096,
-    ) -> AsyncGenerator[str, None]:
-        """
-        Stream chat via SSE.
-
-        Yields:
-            Text chunks as they arrive.
-        """
+    async def chat_stream(self, messages: list[dict], system_prompt: str | None = None, temperature: float = 0.2, max_tokens: int = 4096) -> AsyncGenerator[str, None]:
         payload = {
             "model": self.model,
             "messages": self._build_messages(messages, system_prompt),
@@ -150,17 +126,91 @@ class DeepSeekClient:
                     except json.JSONDecodeError:
                         continue
                     except (KeyError, IndexError):
-                        logger.warning("Unexpected SSE chunk format: %s", data_str)
                         continue
         except Exception:
             logger.error("DeepSeek streaming failed", exc_info=True)
             yield "\n\n[Error generating response]"
 
-    def close(self):
-        """Close the synchronous HTTP client."""
-        self._http_client.close()
 
-    async def aclose(self):
-        """Close both HTTP clients (call from async context / lifespan shutdown)."""
-        self._http_client.close()
-        await self._async_http_client.aclose()
+class OllamaClient(BaseLLMClient):
+    def __init__(self):
+        conf = settings_manager.get()
+        self.base_url = conf.ollama_base_url.rstrip("/")
+        self.model = conf.ollama_model
+
+        self._http_client = httpx.Client(
+            timeout=Timeout(120.0, connect=10.0, read=120.0),
+            follow_redirects=True,
+        )
+        self._async_http_client = httpx.AsyncClient(
+            timeout=Timeout(300.0, connect=10.0, read=300.0),
+            follow_redirects=True,
+        )
+
+    def _build_messages(self, messages: list[dict], system_prompt: str | None) -> list[dict]:
+        if system_prompt:
+            return [{"role": "system", "content": system_prompt}] + messages
+        return messages
+
+    def chat(self, messages: list[dict], system_prompt: str | None = None, temperature: float = 0.2, max_tokens: int = 4096) -> str:
+        payload = {
+            "model": self.model,
+            "messages": self._build_messages(messages, system_prompt),
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens
+            },
+            "stream": False,
+        }
+
+        try:
+            response = self._http_client.post(
+                f"{self.base_url}/api/chat",
+                json=payload,
+            )
+            response.raise_for_status()
+            return response.json()["message"]["content"]
+        except Exception as e:
+            logger.error("Ollama API call failed", exc_info=True)
+            raise
+
+    async def chat_stream(self, messages: list[dict], system_prompt: str | None = None, temperature: float = 0.2, max_tokens: int = 4096) -> AsyncGenerator[str, None]:
+        payload = {
+            "model": self.model,
+            "messages": self._build_messages(messages, system_prompt),
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens
+            },
+            "stream": True,
+        }
+
+        try:
+            async with self._async_http_client.stream(
+                "POST",
+                f"{self.base_url}/api/chat",
+                json=payload,
+            ) as response:
+                response.raise_for_status()
+                async for line in response.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        data = json.loads(line)
+                        content = data.get("message", {}).get("content", "")
+                        if content:
+                            yield content
+                        if data.get("done"):
+                            break
+                    except json.JSONDecodeError:
+                        continue
+        except Exception:
+            logger.error("Ollama streaming failed", exc_info=True)
+            yield "\n\n[Error generating response with Ollama]"
+
+
+def get_llm_client() -> BaseLLMClient:
+    conf = settings_manager.get()
+    if conf.llm_provider == "ollama":
+        return OllamaClient()
+    return DeepSeekClient()

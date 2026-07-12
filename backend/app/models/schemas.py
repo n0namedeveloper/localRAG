@@ -155,6 +155,7 @@ class SearchRequest(BaseModel):
     score_threshold: float = 0.3
     language: str | None = None
     symbol_type: SymbolType | None = None
+    exact_match: bool = False
 
 
 class SearchResult(BaseModel):

@@ -14,7 +14,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/ ./backend/
-COPY grammars/ ./grammars/
+RUN mkdir -p grammars/
 
 ENV PYTHONPATH=/app/backend
 ENV DATA_DIR=/app/data

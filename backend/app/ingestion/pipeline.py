@@ -125,39 +125,93 @@ class IngestionPipeline:
                     "duration_sec": time.time() - start_time,
                 }
 
-            # ── Step 2: Parse all files ──
-            self._update_state(repo_name, "parsing")
-            all_symbols: list[ParsedSymbol] = []
-            for file_path in source_files:
+            # ── Incremental Indexing Setup ──
+            repo_index_dir = INDEX_DIR / repo_name
+            repo_index_dir.mkdir(parents=True, exist_ok=True)
+            hashes_file = repo_index_dir / "hashes.json"
+            symbols_file = repo_index_dir / "symbols.json"
+
+            old_hashes = {}
+            if hashes_file.exists():
                 try:
-                    source = file_path.read_bytes()
-                    rel_path = file_path.relative_to(repo_path)
-                    symbols = self.parser.parse_file(
-                        rel_path, source, repo_name, repo_url, branch
-                    )
-                    all_symbols.extend(symbols)
+                    old_hashes = json.loads(hashes_file.read_text())
+                except Exception:
+                    pass
+
+            cached_symbols_dict = {}
+            if symbols_file.exists():
+                try:
+                    cached_symbols_dict = json.loads(symbols_file.read_text())
+                except Exception:
+                    pass
+
+            if force_reindex:
+                old_hashes = {}
+                cached_symbols_dict = {}
+                self.vector_store.delete_repo(repo_name)
+
+            new_hashes = {}
+            changed_files = []
+            unchanged_files = []
+
+            for file_path in source_files:
+                rel_path = str(file_path.relative_to(repo_path))
+                try:
+                    source_bytes = file_path.read_bytes()
+                    file_hash = hashlib.sha256(source_bytes).hexdigest()
+                    new_hashes[rel_path] = file_hash
+
+                    if rel_path not in old_hashes or old_hashes[rel_path] != file_hash:
+                        changed_files.append((file_path, rel_path, source_bytes))
+                    else:
+                        unchanged_files.append(rel_path)
+                except Exception as e:
+                    logger.warning(f"Could not read {file_path}: {e}")
+
+            deleted_files = [rp for rp in old_hashes if rp not in new_hashes]
+            logger.info(f"Scan: {len(changed_files)} changed/new, {len(unchanged_files)} unchanged, {len(deleted_files)} deleted")
+
+            # ── Step 2: Delete old vectors ──
+            if not force_reindex:
+                for rel_path in deleted_files:
+                    self.vector_store.delete_file_chunks(repo_name, rel_path)
+                    cached_symbols_dict.pop(rel_path, None)
+                for _, rel_path, _ in changed_files:
+                    self.vector_store.delete_file_chunks(repo_name, rel_path)
+
+            # ── Step 3: Parse changed files ──
+            self._update_state(repo_name, "parsing")
+            parsed_changed_symbols: list[ParsedSymbol] = []
+            for file_path, rel_path, source_bytes in changed_files:
+                try:
+                    symbols = self.parser.parse_file(Path(rel_path), source_bytes, repo_name, repo_url, branch)
+                    cached_symbols_dict[rel_path] = [s.model_dump() for s in symbols]
+                    parsed_changed_symbols.extend(symbols)
                 except Exception as e:
                     logger.warning(f"Failed to parse {file_path}: {e}")
 
-            logger.info(f"Parsed {len(all_symbols)} symbols from {len(source_files)} files")
+            # Combine all symbols for graph
+            all_symbols: list[ParsedSymbol] = []
+            for rel_path, sym_dicts in cached_symbols_dict.items():
+                for s in sym_dicts:
+                    all_symbols.append(ParsedSymbol(**s))
 
-            # ── Step 3: Chunk symbols ──
+            logger.info(f"Parsed {len(parsed_changed_symbols)} new symbols. Total symbols: {len(all_symbols)}")
+
+            # ── Step 4: Chunk & Embed ONLY changed files ──
             self._update_state(repo_name, "chunking")
-            chunks = self.chunker.chunk_all(all_symbols)
-            logger.info(f"Generated {len(chunks)} chunks")
+            chunks = self.chunker.chunk_all(parsed_changed_symbols)
+            logger.info(f"Generated {len(chunks)} chunks for {len(changed_files)} changed files")
 
-            # ── Step 4: Delete old data for this repo (if re-indexing) ──
-            if force_reindex:
-                self.vector_store.delete_repo(repo_name)
-
-            # ── Step 5: Embed and index into Qdrant ──
             self._update_state(repo_name, "indexing")
-            indexed_result = self.vector_store.index_chunks(chunks)
-            # indexed_result is an UpdateResult object; use the number of chunks provided as the count
-            indexed_count = len(chunks)
-            logger.info(f"Indexed {indexed_count} chunks into Qdrant")
+            if chunks:
+                self.vector_store.index_chunks(chunks)
 
-            # ── Step 6: Build dependency graph ──
+            # Save caches
+            hashes_file.write_text(json.dumps(new_hashes, indent=2))
+            symbols_file.write_text(json.dumps(cached_symbols_dict, indent=2, default=str))
+
+            # ── Step 5: Build dependency graph ──
             self._update_state(repo_name, "building_graph")
             graph = self.dep_graph.build(all_symbols)
             logger.info(
@@ -167,13 +221,14 @@ class IngestionPipeline:
 
             # ── Step 7: Save state and meta.json for Dashboard ──
             duration = time.time() - start_time
+            total_chunks = self.vector_store.count_chunks(repo_name)
             meta = {
                 "repo_name": repo_name,
                 "repo_url": repo_url,
                 "branch": branch,
                 "files_parsed": len(source_files),
                 "symbols_count": len(all_symbols),
-                "chunks_count": len(chunks),
+                "chunks_count": total_chunks,
                 "graph_nodes": graph.number_of_nodes(),
                 "graph_edges": graph.number_of_edges(),
                 "duration_sec": round(duration, 2),
@@ -188,13 +243,20 @@ class IngestionPipeline:
                 json.dumps(meta, indent=2, default=str)
             )
 
+            # Get git hotspots
+            hotspots = self.repo_manager.get_git_hotspots(repo_path)
+
             # Save graph.json for /api/graph/:repo_name
+            nodes_data = []
+            for n in graph.nodes:
+                data = graph.nodes[n].copy()
+                file_path_str = data.get("file_path", "").replace("\\", "/")
+                data["commit_count"] = hotspots.get(file_path_str, 0)
+                nodes_data.append({"id": str(n), "data": data})
+
             graph_data = {
                 "repo_name": repo_name,
-                "nodes": [
-                    {"id": str(n), "data": graph.nodes[n]}
-                    for n in graph.nodes
-                ],
+                "nodes": nodes_data,
                 "edges": [
                     {"id": f"{u}->{v}", "source": str(u), "target": str(v),
                      "label": str(graph.edges[u, v].get("dep_type", "depends")),
@@ -213,7 +275,7 @@ class IngestionPipeline:
                 "status": "ready",
                 "files_parsed": len(source_files),
                 "symbols_count": len(all_symbols),
-                "chunks_count": len(chunks),
+                "chunks_count": total_chunks,
                 "graph_nodes": graph.number_of_nodes(),
                 "graph_edges": graph.number_of_edges(),
                 "duration_sec": round(duration, 2),
