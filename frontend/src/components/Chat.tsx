@@ -14,7 +14,18 @@ interface RepoInfo {
   repo_name: string;
 }
 
-export const Chat: React.FC = () => {
+export interface ExternalQuery {
+  text: string;
+  timestamp: number;
+}
+
+interface ChatProps {
+  isSidePanel?: boolean;
+  repoOverride?: string;
+  externalQuery?: ExternalQuery | null;
+}
+
+export const Chat: React.FC<ChatProps> = ({ isSidePanel, repoOverride, externalQuery }) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -24,6 +35,10 @@ export const Chat: React.FC = () => {
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (repoOverride) {
+      setSelectedRepo(repoOverride);
+      return;
+    }
     fetch('/api/repo/list')
       .then(res => res.json())
       .then(data => {
@@ -33,7 +48,7 @@ export const Chat: React.FC = () => {
         }
       })
       .catch(console.error);
-  }, []);
+  }, [repoOverride]);
 
   useEffect(() => {
     if (selectedRepo) {
@@ -62,11 +77,11 @@ export const Chat: React.FC = () => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isStreaming]);
 
-  const handleSend = async () => {
-    if (!input.trim() || !selectedRepo) return;
+  const handleSend = async (queryOverride?: string) => {
+    const userText = queryOverride || input;
+    if (!userText.trim() || !selectedRepo) return;
 
-    const userText = input;
-    setInput('');
+    if (!queryOverride) setInput('');
     setMessages(prev => [...prev, { role: 'user', content: userText }]);
     
     // Add empty assistant message placeholder
@@ -139,26 +154,34 @@ export const Chat: React.FC = () => {
     }
   };
 
+  useEffect(() => {
+    if (externalQuery && selectedRepo) {
+      handleSend(externalQuery.text);
+    }
+  }, [externalQuery]);
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: isSidePanel ? 'var(--bg-secondary)' : 'transparent' }}>
       {/* Header */}
-      <div style={{ padding: '20px 40px', borderBottom: '1px solid var(--border-color)', display: 'flex', gap: 20, alignItems: 'center' }}>
-        <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Code Chat</h1>
-        <select 
-          className="input-field" 
-          style={{ width: 250, padding: '8px 12px' }}
-          value={selectedRepo}
-          onChange={e => setSelectedRepo(e.target.value)}
-        >
-          {repos.length === 0 ? <option value="">No repos available</option> : null}
-          {repos.map(r => (
-            <option key={r.repo_name} value={r.repo_name}>{r.repo_name}</option>
-          ))}
-        </select>
-      </div>
+      {!isSidePanel && (
+        <div style={{ padding: '20px 40px', borderBottom: '1px solid var(--border-color)', display: 'flex', gap: 20, alignItems: 'center' }}>
+          <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0 }}>Code Chat</h1>
+          <select 
+            className="input-field" 
+            style={{ width: 250, padding: '8px 12px' }}
+            value={selectedRepo}
+            onChange={e => setSelectedRepo(e.target.value)}
+          >
+            {repos.length === 0 ? <option value="">No repos available</option> : null}
+            {repos.map(r => (
+              <option key={r.repo_name} value={r.repo_name}>{r.repo_name}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       {/* Messages */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '40px', display: 'flex', flexDirection: 'column', gap: '32px' }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: isSidePanel ? '20px' : '40px', display: 'flex', flexDirection: 'column', gap: isSidePanel ? '16px' : '32px' }}>
         {messages.length === 0 ? (
           <div style={{ margin: 'auto', textAlign: 'center', color: 'var(--text-muted)' }}>
             <div style={{ fontSize: 32, marginBottom: 16 }}>💭</div>
@@ -220,8 +243,8 @@ export const Chat: React.FC = () => {
       </div>
 
       {/* Input */}
-      <div style={{ padding: '24px 40px', background: 'var(--bg-secondary)', borderTop: '1px solid var(--border-color)' }}>
-        <div style={{ display: 'flex', gap: 12, maxWidth: 1000, margin: '0 auto' }}>
+      <div style={{ padding: isSidePanel ? '16px' : '24px 40px', background: 'var(--bg-secondary)', borderTop: '1px solid var(--border-color)' }}>
+        <div style={{ display: 'flex', gap: 12, maxWidth: 1000, margin: '0 auto', flexDirection: isSidePanel ? 'column' : 'row' }}>
           <input
             className="input-field"
             value={input}
@@ -233,9 +256,9 @@ export const Chat: React.FC = () => {
           />
           <button 
             className="btn-primary" 
-            onClick={handleSend} 
+            onClick={() => handleSend()} 
             disabled={isStreaming || !input.trim() || !selectedRepo}
-            style={{ borderRadius: 24, padding: '0 24px' }}
+            style={{ borderRadius: 24, padding: isSidePanel ? '12px' : '0 24px' }}
           >
             {isStreaming ? 'Thinking...' : 'Send'}
           </button>

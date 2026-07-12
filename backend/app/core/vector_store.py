@@ -134,6 +134,7 @@ class VectorStore:
         score_threshold: float = 0.0,
         language: str | None = None,
         symbol_type: str | None = None,
+        file_path: str | None = None,
     ) -> list[tuple[ChunkMetadata, float]]:
         """
         Hybrid search: dense vector similarity + payload filters.
@@ -145,6 +146,7 @@ class VectorStore:
             score_threshold: Minimum similarity score.
             language: Filter by programming language.
             symbol_type: Filter by symbol type (function, class, etc.).
+            file_path: Filter by exact file path.
 
         Returns:
             List of (ChunkMetadata, score) tuples sorted by relevance.
@@ -172,6 +174,13 @@ class VectorStore:
                 qdrant_models.FieldCondition(
                     key="symbol_type",
                     match=qdrant_models.MatchValue(value=symbol_type),
+                )
+            )
+        if file_path:
+            must_conditions.append(
+                qdrant_models.FieldCondition(
+                    key="file_path",
+                    match=qdrant_models.MatchValue(value=file_path),
                 )
             )
 

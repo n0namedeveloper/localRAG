@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import ForceGraph2D from 'react-force-graph-2d';
+import { Chat, ExternalQuery } from './Chat';
 
 interface APINode {
   id: string;
@@ -27,12 +28,15 @@ export const RepoDetail: React.FC = () => {
   
   const [expandedFiles, setExpandedFiles] = useState<Set<string>>(new Set());
   const [hoverNode, setHoverNode] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<any | null>(null);
   
+  const [externalQuery, setExternalQuery] = useState<ExternalQuery | null>(null);
+
   const containerRef = useRef<HTMLDivElement>(null);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const graphRef = useRef<any>();
 
-  // Resize observer for responsive canvas
+  // Resize observer
   useEffect(() => {
     if (!containerRef.current) return;
     const observer = new ResizeObserver(entries => {
@@ -47,7 +51,7 @@ export const RepoDetail: React.FC = () => {
     return () => observer.disconnect();
   }, []);
 
-  // Fetch API data
+  // Fetch
   useEffect(() => {
     if (!repoName) return;
     fetch(`/api/graph/${encodeURIComponent(repoName)}`)
@@ -63,7 +67,6 @@ export const RepoDetail: React.FC = () => {
       });
   }, [repoName]);
 
-  // Derived graph data computation
   const graphData = useMemo(() => {
     if (apiNodes.length === 0) return { nodes: [], links: [] };
 
@@ -75,7 +78,6 @@ export const RepoDetail: React.FC = () => {
 
     const files = new Set(apiNodes.map(n => n.data.file_path));
 
-    // 1. Create File nodes
     files.forEach(file => {
       const fileId = `file:${file}`;
       finalNodes.set(fileId, {
@@ -83,16 +85,15 @@ export const RepoDetail: React.FC = () => {
         isFile: true,
         path: file,
         name: file.split(/[/\\]/).pop() || file,
-        val: 3, // slightly larger
+        val: 3,
         color: expandedFiles.has(file) ? '#3b3f54' : '#6366f1',
       });
     });
 
-    // 2. Create Symbol nodes if file is expanded
     apiNodes.forEach(node => {
       const file = node.data.file_path;
       if (expandedFiles.has(file)) {
-        let color = '#8b5cf6'; // default
+        let color = '#8b5cf6';
         if (node.data.symbol_type === 'class') color = '#ec4899';
         else if (node.data.symbol_type === 'function' || node.data.symbol_type === 'method') color = '#0ea5e9';
         else if (node.data.symbol_type === 'import') color = '#64748b';
@@ -107,7 +108,6 @@ export const RepoDetail: React.FC = () => {
           color,
         });
 
-        // Link symbol to its File hub (invisible or faint link) to keep them clustered
         const hubEdgeId = `hub:${node.id}->file:${file}`;
         finalEdges.set(hubEdgeId, {
           id: hubEdgeId,
@@ -118,7 +118,6 @@ export const RepoDetail: React.FC = () => {
       }
     });
 
-    // 3. Process API edges and aggregate them based on expansion state
     apiEdges.forEach(edge => {
       const srcNode = nodeMap.get(edge.source);
       const tgtNode = nodeMap.get(edge.target);
@@ -127,11 +126,10 @@ export const RepoDetail: React.FC = () => {
       const srcFile = srcNode.data.file_path;
       const tgtFile = tgtNode.data.file_path;
 
-      // Determine visual source/target based on expansion
       const vSrc = expandedFiles.has(srcFile) ? edge.source : `file:${srcFile}`;
       const vTgt = expandedFiles.has(tgtFile) ? edge.target : `file:${tgtFile}`;
 
-      if (vSrc === vTgt) return; // Skip self-edges if they resolve to the same node (e.g. within unexpanded file)
+      if (vSrc === vTgt) return;
 
       const edgeKey = `${vSrc}->${vTgt}`;
       if (!finalEdges.has(edgeKey)) {
@@ -143,7 +141,7 @@ export const RepoDetail: React.FC = () => {
           isHub: false,
         });
       } else {
-        finalEdges.get(edgeKey).weight += 1; // aggregate weights
+        finalEdges.get(edgeKey).weight += 1;
       }
     });
 
@@ -153,37 +151,36 @@ export const RepoDetail: React.FC = () => {
     };
   }, [apiNodes, apiEdges, expandedFiles]);
 
-  // Compute highlighting (hovered node and its 1-hop neighbors)
   const highlightedNodes = useMemo(() => {
     const set = new Set<string>();
-    if (hoverNode) {
-      set.add(hoverNode);
+    const activeNode = hoverNode || selectedNode?.id;
+    if (activeNode) {
+      set.add(activeNode);
       graphData.links.forEach((l: any) => {
-        // react-force-graph replaces source/target string IDs with object references during render
         const srcId = typeof l.source === 'object' ? l.source.id : l.source;
         const tgtId = typeof l.target === 'object' ? l.target.id : l.target;
-        
-        if (srcId === hoverNode) set.add(tgtId);
-        if (tgtId === hoverNode) set.add(srcId);
+        if (srcId === activeNode) set.add(tgtId);
+        if (tgtId === activeNode) set.add(srcId);
       });
     }
     return set;
-  }, [hoverNode, graphData.links]);
+  }, [hoverNode, selectedNode, graphData.links]);
 
   const highlightedLinks = useMemo(() => {
     const set = new Set<string>();
-    if (hoverNode) {
+    const activeNode = hoverNode || selectedNode?.id;
+    if (activeNode) {
       graphData.links.forEach((l: any) => {
         const srcId = typeof l.source === 'object' ? l.source.id : l.source;
         const tgtId = typeof l.target === 'object' ? l.target.id : l.target;
-        if (srcId === hoverNode || tgtId === hoverNode) set.add(l.id);
+        if (srcId === activeNode || tgtId === activeNode) set.add(l.id);
       });
     }
     return set;
-  }, [hoverNode, graphData.links]);
+  }, [hoverNode, selectedNode, graphData.links]);
 
-  // Interactions
   const handleNodeClick = useCallback((node: any) => {
+    setSelectedNode(node);
     if (node.isFile) {
       setExpandedFiles(prev => {
         const next = new Set(prev);
@@ -192,7 +189,6 @@ export const RepoDetail: React.FC = () => {
         return next;
       });
     } else {
-      // Could fly to node or center it
       graphRef.current?.centerAt(node.x, node.y, 500);
       graphRef.current?.zoom(4, 500);
     }
@@ -202,21 +198,18 @@ export const RepoDetail: React.FC = () => {
     setHoverNode(node ? node.id : null);
   }, []);
 
-  // Custom node drawing on Canvas
   const drawNode = useCallback((node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
     const isHighlighted = highlightedNodes.has(node.id);
-    const isHovered = node.id === hoverNode;
-    const isDimmed = hoverNode && !isHighlighted;
+    const isHovered = node.id === hoverNode || node.id === selectedNode?.id;
+    const isDimmed = (hoverNode || selectedNode) && !isHighlighted;
     
     const r = node.isFile ? (expandedFiles.has(node.path) ? 2 : 6) : 3;
     
-    // Draw circle
     ctx.beginPath();
     ctx.arc(node.x, node.y, r, 0, 2 * Math.PI, false);
     ctx.fillStyle = isDimmed ? '#1c1f2e' : node.color;
     ctx.fill();
     
-    // Hover ring
     if (isHighlighted && !node.isFile) {
       ctx.beginPath();
       ctx.arc(node.x, node.y, r + 2, 0, 2 * Math.PI, false);
@@ -225,7 +218,6 @@ export const RepoDetail: React.FC = () => {
       ctx.stroke();
     }
     
-    // Text rendering logic (only render if zoomed in enough or if highlighted/file)
     const label = node.name;
     const showText = node.isFile || isHighlighted || globalScale > 2;
     
@@ -242,64 +234,126 @@ export const RepoDetail: React.FC = () => {
       
       ctx.fillText(label, node.x, textY);
     }
-  }, [highlightedNodes, hoverNode, expandedFiles]);
+  }, [highlightedNodes, hoverNode, selectedNode, expandedFiles]);
+
+  const handleZoomIn = () => {
+    const currentZoom = graphRef.current?.zoom();
+    if (currentZoom) graphRef.current?.zoom(currentZoom * 1.5, 300);
+  };
+  
+  const handleZoomOut = () => {
+    const currentZoom = graphRef.current?.zoom();
+    if (currentZoom) graphRef.current?.zoom(currentZoom / 1.5, 300);
+  };
+
+  const handleZoomFit = () => {
+    graphRef.current?.zoomToFit(400, 40);
+  };
+
+  const handleExplain = () => {
+    if (!selectedNode) return;
+    const typeStr = selectedNode.isFile ? "file" : (selectedNode.type || "symbol");
+    const prompt = `Explain the ${typeStr} "${selectedNode.name}" located in "${selectedNode.path}". What is its purpose?`;
+    setExternalQuery({ text: prompt, timestamp: Date.now() });
+  };
 
   return (
-    <div style={{ height: '100vh', width: '100%', display: 'flex', flexDirection: 'column' }}>
-      <div style={{ padding: '16px 24px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: 16 }}>
-        <button className="btn-ghost" onClick={() => navigate('/')}>← Back</button>
-        <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>{repoName} Dependency Graph</h2>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 16, fontSize: 12, color: 'var(--text-muted)' }}>
-          <div><span style={{ color: '#6366f1' }}>●</span> File</div>
-          <div><span style={{ color: '#8b5cf6' }}>●</span> Class</div>
-          <div><span style={{ color: '#0ea5e9' }}>●</span> Function/Method</div>
-        </div>
-      </div>
+    <div style={{ height: '100vh', width: '100%', display: 'flex' }}>
       
-      <div ref={containerRef} style={{ flex: 1, background: 'var(--bg-primary)', overflow: 'hidden' }}>
-        {loading ? (
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-muted)' }}>
-            Loading force graph...
+      {/* Left side: Graph */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', position: 'relative' }}>
+        <div style={{ padding: '16px 24px', background: 'var(--bg-secondary)', borderBottom: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: 16 }}>
+          <button className="btn-ghost" onClick={() => navigate('/')}>← Back</button>
+          <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>{repoName} Dependency Graph</h2>
+        </div>
+        
+        <div ref={containerRef} style={{ flex: 1, background: 'var(--bg-primary)', overflow: 'hidden' }} onClick={(e) => {
+          // Deselect node if clicking on empty canvas
+          if (e.target instanceof HTMLCanvasElement && !hoverNode) {
+            setSelectedNode(null);
+          }
+        }}>
+          {loading ? (
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%', color: 'var(--text-muted)' }}>
+              Loading force graph...
+            </div>
+          ) : (
+            <ForceGraph2D
+              ref={graphRef}
+              width={dimensions.width}
+              height={dimensions.height}
+              graphData={graphData}
+              
+              nodeRelSize={4}
+              nodeVal={node => (node as any).val}
+              nodeColor={node => (node as any).color}
+              
+              onNodeClick={handleNodeClick}
+              onNodeHover={handleNodeHover}
+              
+              nodeCanvasObject={drawNode}
+              
+              linkColor={(link: any) => {
+                if (link.isHub) return 'rgba(255, 255, 255, 0.05)';
+                const isDimmed = (hoverNode || selectedNode) && !highlightedLinks.has(link.id);
+                if (isDimmed) return 'rgba(255, 255, 255, 0.02)';
+                if (highlightedLinks.has(link.id)) return 'rgba(99, 102, 241, 0.8)';
+                return 'rgba(148, 163, 184, 0.2)';
+              }}
+              linkWidth={(link: any) => {
+                if (link.isHub) return 0.5;
+                return highlightedLinks.has(link.id) ? 2 : Math.min(2, link.weight * 0.5);
+              }}
+              linkDirectionalArrowLength={(link: any) => link.isHub ? 0 : (highlightedLinks.has(link.id) ? 4 : 2)}
+              linkDirectionalArrowRelPos={1}
+              
+              d3AlphaDecay={0.05}
+              d3VelocityDecay={0.2}
+            />
+          )}
+        </div>
+
+        {/* Legend Panel */}
+        <div className="glass-card fade-in" style={{ position: 'absolute', bottom: 24, left: 24, padding: '16px', display: 'flex', flexDirection: 'column', gap: 12, fontSize: 13, background: 'var(--bg-card)' }}>
+          <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Legend</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#6366f1', fontSize: 16 }}>●</span> File (Collapsed)</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#3b3f54', fontSize: 16 }}>●</span> File (Expanded)</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#ec4899', fontSize: 16 }}>●</span> Class</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#0ea5e9', fontSize: 16 }}>●</span> Function / Method</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ color: '#64748b', fontSize: 16 }}>●</span> Import / Other</div>
+        </div>
+
+        {/* Controls Panel */}
+        <div style={{ position: 'absolute', bottom: 24, right: 24, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button className="glass-card" style={{ width: 40, height: 40, color: 'white', cursor: 'pointer', background: 'var(--bg-card)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }} onClick={handleZoomIn}>+</button>
+          <button className="glass-card" style={{ width: 40, height: 40, color: 'white', cursor: 'pointer', background: 'var(--bg-card)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 20 }} onClick={handleZoomOut}>-</button>
+          <button className="glass-card" style={{ width: 40, height: 40, color: 'white', cursor: 'pointer', background: 'var(--bg-card)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }} onClick={handleZoomFit}>⌖</button>
+        </div>
+
+        {/* Selected Node Details Tooltip overlay (in graph area) */}
+        {selectedNode && (
+          <div className="glass-card fade-in" style={{ position: 'absolute', top: 80, right: 24, padding: '20px', width: '320px', background: 'var(--bg-card)', border: '1px solid var(--accent-primary)', boxShadow: 'var(--shadow-lg)' }}>
+            <div style={{ fontSize: 12, textTransform: 'uppercase', color: 'var(--text-muted)', fontWeight: 600, marginBottom: 4 }}>
+              {selectedNode.isFile ? 'File' : selectedNode.type || 'Symbol'}
+            </div>
+            <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', wordBreak: 'break-all', marginBottom: 8 }}>
+              {selectedNode.name}
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', wordBreak: 'break-all', marginBottom: 20 }}>
+              {selectedNode.path}
+            </div>
+            <button className="btn-primary" style={{ width: '100%', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8 }} onClick={handleExplain}>
+              <span>✨</span> Explain with AI
+            </button>
           </div>
-        ) : (
-          <ForceGraph2D
-            ref={graphRef}
-            width={dimensions.width}
-            height={dimensions.height}
-            graphData={graphData}
-            
-            nodeRelSize={4}
-            nodeVal={node => (node as any).val}
-            nodeColor={node => (node as any).color}
-            
-            // Interaction
-            onNodeClick={handleNodeClick}
-            onNodeHover={handleNodeHover}
-            
-            // Custom drawing
-            nodeCanvasObject={drawNode}
-            
-            // Link styling
-            linkColor={(link: any) => {
-              if (link.isHub) return 'rgba(255, 255, 255, 0.05)'; // almost invisible hubs
-              const isDimmed = hoverNode && !highlightedLinks.has(link.id);
-              if (isDimmed) return 'rgba(255, 255, 255, 0.02)';
-              if (highlightedLinks.has(link.id)) return 'rgba(99, 102, 241, 0.8)';
-              return 'rgba(148, 163, 184, 0.2)';
-            }}
-            linkWidth={(link: any) => {
-              if (link.isHub) return 0.5;
-              return highlightedLinks.has(link.id) ? 2 : Math.min(2, link.weight * 0.5);
-            }}
-            linkDirectionalArrowLength={(link: any) => link.isHub ? 0 : (highlightedLinks.has(link.id) ? 4 : 2)}
-            linkDirectionalArrowRelPos={1}
-            
-            // Engine settings
-            d3AlphaDecay={0.05}
-            d3VelocityDecay={0.2}
-          />
         )}
       </div>
+
+      {/* Right side: Chat Panel */}
+      <div style={{ width: '400px', borderLeft: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', background: 'var(--bg-secondary)', zIndex: 10 }}>
+        <Chat isSidePanel={true} repoOverride={repoName} externalQuery={externalQuery} />
+      </div>
+
     </div>
   );
 };

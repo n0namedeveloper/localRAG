@@ -122,11 +122,19 @@ class RAGEngine:
     ) -> list[tuple[ChunkMetadata, float]]:
         """Vector search for relevant code chunks."""
         repo_name = self._extract_repo_name(repo_url) if repo_url else None
+        
+        # Check if the query asks about a specific file (e.g. from the UI "Explain" button)
+        file_path_filter = None
+        m = re.search(r'located in "([^"]+)"', query)
+        if m:
+            file_path_filter = m.group(1)
+
         return self.vector_store.search(
             query=query,
             repo_name=repo_name,
             top_k=top_k,
             score_threshold=0.3,
+            file_path=file_path_filter,
         )
 
     def _enrich_with_graph(
