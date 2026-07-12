@@ -25,7 +25,17 @@ def _get_language(lang_name: str):
     """Lazy load and cache a tree-sitter Language object for the given language."""
     if lang_name not in LANGUAGES:
         if lang_name == "python":
+            from tree_sitter_python import language as python_language
             LANGUAGES[lang_name] = Language(python_language())
+        elif lang_name == "javascript":
+            import tree_sitter_javascript
+            LANGUAGES[lang_name] = Language(tree_sitter_javascript.language())
+        elif lang_name == "typescript":
+            import tree_sitter_typescript
+            LANGUAGES[lang_name] = Language(tree_sitter_typescript.language_typescript())
+        elif lang_name == "tsx":
+            import tree_sitter_typescript
+            LANGUAGES[lang_name] = Language(tree_sitter_typescript.language_tsx())
         else:
             raise ValueError(
                 f"Language not available: {lang_name}. "
@@ -91,6 +101,48 @@ JAVASCRIPT_QUERIES = {
     "class_def": """
         (class_declaration
             name: (identifier) @name
+            body: (class_body) @body
+        ) @class
+    """,
+    "method_def": """
+        (method_definition
+            name: (property_identifier) @name
+            parameters: (formal_parameters) @params
+            body: (statement_block) @body
+        ) @func
+    """,
+    "import": """
+        (import_statement
+            source: (string) @module
+        ) @import
+    """,
+    "export": """
+        (export_statement
+            declaration: (_) @exported
+        ) @export
+    """,
+}
+
+TYPESCRIPT_QUERIES = {
+    "function_def": """
+        (function_declaration
+            name: (identifier) @name
+            parameters: (formal_parameters) @params
+            body: (statement_block) @body
+        ) @func
+    """,
+    "arrow_function": """
+        (variable_declarator
+            name: (identifier) @name
+            value: (arrow_function
+                parameters: (formal_parameters) @params
+                body: (statement_block)? @body
+            )
+        ) @func
+    """,
+    "class_def": """
+        (class_declaration
+            name: (type_identifier) @name
             body: (class_body) @body
         ) @class
     """,
@@ -220,9 +272,9 @@ CPP_QUERIES = {
 LANGUAGE_QUERIES = {
     "python": PYTHON_QUERIES,
     "javascript": JAVASCRIPT_QUERIES,
-    "typescript": JAVASCRIPT_QUERIES,  # TS shares JS grammar
+    "typescript": TYPESCRIPT_QUERIES,
     "jsx": JAVASCRIPT_QUERIES,
-    "tsx": JAVASCRIPT_QUERIES,
+    "tsx": TYPESCRIPT_QUERIES,
     "go": GO_QUERIES,
     "rust": RUST_QUERIES,
     "java": JAVA_QUERIES,

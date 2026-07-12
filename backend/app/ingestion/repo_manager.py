@@ -22,6 +22,8 @@ def repo_url_to_name(repo_url: str) -> str:
         https://github.com/user/repo.git → user_repo
         git@github.com:user/repo.git       → user_repo
     """
+    # Remove URL fragment
+    repo_url = repo_url.split("#")[0]
     # Remove trailing .git and protocol
     cleaned = re.sub(r"^https?://github\.com/", "", repo_url)
     cleaned = re.sub(r"^git@github\.com:", "", cleaned)
@@ -63,6 +65,7 @@ class RepoManager:
         Returns:
             Tuple of (git.Repo object, local path, status enum).
         """
+        repo_url = repo_url.split("#")[0]
         repo_path = _get_repo_path(repo_url)
 
         if repo_path.exists():
@@ -124,9 +127,15 @@ class RepoManager:
             repo = Repo(str(repo_path))
             origin = repo.remotes.origin
             origin.fetch()
-            repo.git.checkout(branch)
-            # Reset to match remote (simplest for shallow clones)
-            repo.git.reset("--hard", f"origin/{branch}")
+
+            # Determine the actual branch to use:
+            # prefer the one passed in, but fall back to the repo's current HEAD
+            available_branches = [ref.name.replace("origin/", "") for ref in origin.refs]
+            effective_branch = branch if branch in available_branches else repo.active_branch.name
+            logger.info(f"Checking out branch: {effective_branch} (available: {available_branches})")
+
+            repo.git.checkout(effective_branch)
+            repo.git.reset("--hard", f"origin/{effective_branch}")
             logger.info(f"Updated to {repo.head.commit.hexsha[:8]}")
             return repo, repo_path, RepoStatus.READY
         except Exception as e:

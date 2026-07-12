@@ -2,43 +2,57 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 
 interface RepoStats {
-  name: string;
+  repo_name: string;
   status: string;
-  files: number;
-  symbols: number;
-  nodes: number;
-  edges: number;
+  files_parsed: number;
+  symbols_count: number;
+  graph_nodes: number;
+  graph_edges: number;
 }
 
 export const RepoCard: React.FC<{ stats: RepoStats }> = ({ stats }) => {
   const navigate = useNavigate();
+  const isReady = stats.status === 'ready';
 
   return (
     <div
-      onClick={() => navigate(`/repos/${encodeURIComponent(stats.name)}`)}
-      className="p-4 border rounded-lg hover:shadow-lg transition-all cursor-pointer bg-white"
+      onClick={() => navigate(`/repos/${encodeURIComponent(stats.repo_name)}`)}
+      className="glass-card"
+      style={{ padding: '24px', cursor: 'pointer', position: 'relative', overflow: 'hidden' }}
     >
-      <h3 className="text-lg font-semibold text-gray-800">{stats.name}</h3>
-      <div className="grid grid-cols-2 gap-2 mt-2">
+      {stats.status === 'indexing' && (
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0, height: 3, 
+          background: 'var(--accent-gradient)', opacity: 0.8
+        }} />
+      )}
+      
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
+        <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)', wordBreak: 'break-all', paddingRight: 16 }}>
+          {stats.repo_name}
+        </h3>
+        <div className={`stat-badge ${stats.status === 'indexing' ? 'pulse-dot' : ''}`} style={{
+          background: isReady ? 'rgba(34, 197, 94, 0.15)' : 'rgba(245, 158, 11, 0.15)',
+          color: isReady ? 'var(--status-ready)' : 'var(--status-indexing)',
+          border: `1px solid ${isReady ? 'rgba(34, 197, 94, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`
+        }}>
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />
+          {stats.status}
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
         <div>
-          <p className="text-sm text-gray-500">Status</p>
-          <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
-            stats.status === 'ready' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'
-          }`}>
-            {stats.status}
-          </span>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Files</div>
+          <div style={{ fontSize: 14, fontWeight: 500 }}>{stats.files_parsed}</div>
         </div>
         <div>
-          <p className="text-sm text-gray-500">Files</p>
-          <p className="text-sm font-semibold text-gray-900">{stats.files}</p>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Symbols</div>
+          <div style={{ fontSize: 14, fontWeight: 500 }}>{stats.symbols_count}</div>
         </div>
-        <div>
-          <p className="text-sm text-gray-500">Symbols</p>
-          <p className="text-sm font-semibold text-gray-900">{stats.symbols}</p>
-        </div>
-        <div>
-          <p className="text-sm text-gray-500">Graph</p>
-          <p className="text-sm font-semibold text-gray-900">{stats.nodes}N / {stats.edges}E</p>
+        <div style={{ gridColumn: 'span 2' }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 4 }}>Graph</div>
+          <div style={{ fontSize: 14, fontWeight: 500 }}>{stats.graph_nodes} Nodes / {stats.graph_edges} Edges</div>
         </div>
       </div>
     </div>

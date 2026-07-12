@@ -39,8 +39,10 @@ async def search(
         }
     """
     try:
-        # Extract bare repo name from URL for filtering
-        repo_name = request.repo_url.rstrip("/").rstrip(".git").split("/")[-1]
+        # Extract bare repo name from URL for filtering (optional)
+        repo_name: str | None = None
+        if request.repo_url:
+            repo_name = request.repo_url.rstrip("/").rstrip(".git").split("/")[-1] or None
         results = vector_store.search(
             query=request.query,
             repo_name=repo_name,

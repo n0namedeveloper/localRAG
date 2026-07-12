@@ -60,9 +60,12 @@ def test_api_endpoints():
     print("✓ API эндпоинты корректны")
 
 def test_ui_exists():
-    """Проверяем наличие UI."""
-    assert os.path.exists('frontend/streamlit_app.py'), "Отсутствует Streamlit UI"
-    print("✓ UI компонент присутствует")
+    """Проверяем наличие React UI."""
+    assert os.path.exists('frontend/src/App.tsx'), "Отсутствует React App.tsx"
+    assert os.path.exists('frontend/package.json'), "Отсутствует frontend/package.json"
+    assert os.path.exists('frontend/index.html'), "Отсутствует frontend/index.html"
+    assert os.path.exists('Dockerfile.ui'), "Отсутствует Dockerfile.ui"
+    print("✓ React UI компонент присутствует")
 
 def test_config_files():
     """Проверяем конфигурационные файлы."""
@@ -112,7 +115,7 @@ if __name__ == "__main__":
         print("  docker-compose up --build")
         print("\nДля тестирования API используйте:")
         print("  http://localhost:8000/docs")
-        print("  http://localhost:8501 (Streamlit UI)")
+        print("  http://localhost:3000 (React UI)")
         
     except AssertionError as e:
         print(f"❌ Ошибка теста: {e}")

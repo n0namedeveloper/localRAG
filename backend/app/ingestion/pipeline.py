@@ -16,7 +16,9 @@ import logging
 import time
 from pathlib import Path
 
-from app.config import settings
+from datetime import datetime
+
+from app.config import settings, INDEX_DIR
 from app.models.schemas import ParsedSymbol, RepoStatus
 from app.ingestion.parser import CodeParser
 from app.ingestion.chunker import CodeChunker
@@ -73,13 +75,19 @@ class IngestionPipeline:
                 chunks_count, graph_nodes, graph_edges, duration_sec
         """
         start_time = time.time()
+        repo_url = repo_url.split("#")[0]
         repo_name = self.repo_manager.get_repo_name(repo_url)
+        # Don't hardcode 'main' — let repo_manager detect the actual branch
 
-        logger.info(f"🚀 Starting ingestion for {repo_url} (branch={branch})")
+        logger.info(f"🚀 Starting ingestion for {repo_url} (branch={branch or 'default'})")
 
         # ── Step 0: Clone / update ──
         status = RepoStatus.INDEXING
         self._update_state(repo_name, "cloning")
+        
+        # Create directory immediately so frontend API /list sees it as 'indexing'
+        repo_index_dir = INDEX_DIR / repo_name
+        repo_index_dir.mkdir(parents=True, exist_ok=True)
 
         repo, repo_path, status = self.repo_manager.get_repo(
             repo_url, branch, github_token=settings.github_token
@@ -91,6 +99,13 @@ class IngestionPipeline:
                 "status": "error",
                 "error": "Failed to clone repository",
             }
+
+        # Detect the actual branch that was checked out
+        try:
+            actual_branch = repo.active_branch.name
+        except Exception:
+            actual_branch = branch or "main"
+        branch = actual_branch
 
         # ── Step 1: List source files ──
         self._update_state(repo_name, "scanning")
@@ -149,17 +164,46 @@ class IngestionPipeline:
             f"{graph.number_of_edges()} edges"
         )
 
-        # ── Step 7: Save state ──
+        # ── Step 7: Save state and meta.json for Dashboard ──
         duration = time.time() - start_time
-        self._update_state(repo_name, "ready", {
+        meta = {
+            "repo_name": repo_name,
+            "repo_url": repo_url,
+            "branch": branch,
             "files_parsed": len(source_files),
             "symbols_count": len(all_symbols),
             "chunks_count": len(chunks),
             "graph_nodes": graph.number_of_nodes(),
             "graph_edges": graph.number_of_edges(),
             "duration_sec": round(duration, 2),
-            "last_indexed": time.time(),
-        })
+            "last_indexed": datetime.utcnow().isoformat(),
+        }
+        self._update_state(repo_name, "ready", meta)
+
+        # Write meta.json so /api/repo/list can discover this repo
+        repo_index_dir = INDEX_DIR / repo_name
+        repo_index_dir.mkdir(parents=True, exist_ok=True)
+        (repo_index_dir / "meta.json").write_text(
+            json.dumps(meta, indent=2, default=str)
+        )
+
+        # Save graph.json for /api/graph/:repo_name
+        graph_data = {
+            "repo_name": repo_name,
+            "nodes": [
+                {"id": str(n), "data": graph.nodes[n]}
+                for n in graph.nodes
+            ],
+            "edges": [
+                {"id": f"{u}->{v}", "source": str(u), "target": str(v),
+                 "label": str(graph.edges[u, v].get("dep_type", "depends")),
+                 "weight": float(graph.edges[u, v].get("weight", 1.0))}
+                for u, v in graph.edges
+            ],
+        }
+        (repo_index_dir / "graph.json").write_text(
+            json.dumps(graph_data, indent=2, default=str)
+        )
 
         logger.info(f"✅ Ingestion complete for {repo_url} in {duration:.1f}s")
 

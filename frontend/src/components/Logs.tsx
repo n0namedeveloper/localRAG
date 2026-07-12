@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect, useRef } from 'react';
 
 interface Log {
   timestamp: string;
@@ -7,21 +6,26 @@ interface Log {
   message: string;
   repo_name?: string;
   stage?: string;
+  logger?: string;
 }
 
 export const Logs: React.FC = () => {
   const [logs, setLogs] = useState<Log[]>([]);
   const [isConnected, setIsConnected] = useState(false);
-  const navigate = useNavigate();
+  const logsEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
 
   useEffect(() => {
     let eventSource: EventSource;
 
     const connect = () => {
-      eventSource = new EventSource('/api/logs');
+      eventSource = new EventSource('/api/logs/stream');
       eventSource.onmessage = (event) => {
         const log: Log = JSON.parse(event.data);
-        setLogs(prev => [log, ...prev]);
+        setLogs(prev => [...prev, log]);
       };
       eventSource.onerror = () => {
         eventSource.close();
@@ -39,48 +43,76 @@ export const Logs: React.FC = () => {
   }, []);
 
   return (
-    <div className="p-6 max-w-7xl mx-auto">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold">Logs</h1>
-        <button
-          onClick={() => navigate(-1)}
-          className="px-4 py-2 text-gray-600 hover:text-gray-800"
-        >
-          ← Back
-        </button>
+    <div style={{ padding: '40px', height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ marginBottom: '24px' }}>
+        <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>System Logs</h1>
+        <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginTop: 4 }}>Real-time stream from ingestion pipeline</p>
       </div>
       
-      <div className="border rounded-lg overflow-hidden">
-        <div className="bg-gray-100 px-4 py-2 border-b flex justify-between">
-          <span className="font-medium">Real-time Logs</span>
-          <span className={`text-sm ${isConnected ? 'text-green-600' : 'text-red-600'}`}>
-            {isConnected ? 'Connected' : 'Disconnected'}
-          </span>
+      <div className="glass-card" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ 
+          background: 'var(--bg-secondary)', 
+          padding: '12px 20px', 
+          borderBottom: '1px solid var(--border-color)',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
+        }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>Terminal</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+            <span style={{ 
+              width: 8, height: 8, borderRadius: '50%', 
+              background: isConnected ? 'var(--status-ready)' : 'var(--status-error)' 
+            }} />
+            <span style={{ color: isConnected ? 'var(--status-ready)' : 'var(--status-error)' }}>
+              {isConnected ? 'Connected' : 'Disconnected'}
+            </span>
+          </div>
         </div>
-        <div className="p-4 space-y-2 max-h-96 overflow-y-auto">
-          {logs.map((log, index) => (
-            <div
-              key={index}
-              className={`p-3 rounded border ${
-                log.level === 'ERROR' ? 'border-red-500 bg-red-50' :
-                log.level === 'WARNING' ? 'border-yellow-500 bg-yellow-50' :
-                'border-gray-200'
-              }`}
-            >
-              <div className="flex justify-between items-center mb-1">
-                <span className={`font-medium ${log.level === 'ERROR' ? 'text-red-600' : 
-                  log.level === 'WARNING' ? 'text-yellow-600' : 'text-gray-800'}`}>
-                  {log.level}
-                </span>
-                <span className="text-sm text-gray-500">
-                  {new Date(log.timestamp).toLocaleTimeString()}
-                </span>
-              </div>
-              <div className="text-gray-700">
-                {log.repo_name ? `[${log.repo_name}] ` : ''}{log.message}
-              </div>
-            </div>
-          ))}
+        
+        <div style={{ 
+          flex: 1, 
+          overflow: 'auto', 
+          background: 'var(--bg-primary)', 
+          padding: '20px', 
+          fontFamily: "'JetBrains Mono', monospace",
+          fontSize: 13
+        }}>
+          {logs.length === 0 ? (
+            <div style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>Waiting for activity...</div>
+          ) : (
+            logs.map((log, i) => {
+              const dateObj = new Date(log.timestamp);
+              const timeStr = isNaN(dateObj.getTime()) ? (log.timestamp || '') : dateObj.toLocaleTimeString();
+              const isErr = log.level === 'ERROR';
+              const isWarn = log.level === 'WARNING';
+              
+              return (
+                <div key={i} style={{ 
+                  display: 'flex', 
+                  gap: 16, 
+                  marginBottom: 8, 
+                  paddingBottom: 8, 
+                  borderBottom: '1px solid var(--border-color)' 
+                }}>
+                  <span style={{ color: 'var(--text-muted)', width: 80, flexShrink: 0 }}>{timeStr}</span>
+                  <span style={{ 
+                    width: 60, flexShrink: 0, fontWeight: 600,
+                    color: isErr ? 'var(--status-error)' : isWarn ? 'var(--status-indexing)' : 'var(--accent-primary)'
+                  }}>
+                    {log.level}
+                  </span>
+                  <span style={{ color: 'var(--text-primary)', flex: 1, wordBreak: 'break-all' }}>{log.message}</span>
+                  {log.logger && (
+                    <span style={{ color: 'var(--text-muted)', fontSize: 11, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {log.logger}
+                    </span>
+                  )}
+                </div>
+              );
+            })
+          )}
+          <div ref={logsEndRef} />
         </div>
       </div>
     </div>

@@ -62,3 +62,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+# Convenience path constants derived from settings
+INDEX_DIR = Path(settings.data_dir) / "index"
+INDEX_DIR.mkdir(parents=True, exist_ok=True)

@@ -118,10 +118,10 @@ class RAGEngine:
         yield sources
 
     def _retrieve_chunks(
-        self, query: str, repo_url: str, top_k: int
+        self, query: str, repo_url: str | None, top_k: int
     ) -> list[tuple[ChunkMetadata, float]]:
         """Vector search for relevant code chunks."""
-        repo_name = self._extract_repo_name(repo_url)
+        repo_name = self._extract_repo_name(repo_url) if repo_url else None
         return self.vector_store.search(
             query=query,
             repo_name=repo_name,
@@ -228,13 +228,17 @@ class RAGEngine:
 
         return sources
 
-    def _build_github_url(self, repo_url: str, file_path: str, line: int) -> str:
+    def _build_github_url(self, repo_url: str | None, file_path: str, line: int) -> str:
         """Build a GitHub permalink to a specific line."""
+        if not repo_url:
+            return ""
         repo_url = repo_url.rstrip(".git").rstrip("/")
         return f"{repo_url}/blob/main/{file_path}#L{line}"
 
-    def _extract_repo_name(self, repo_url: str) -> str:
+    def _extract_repo_name(self, repo_url: str | None) -> str | None:
         """Extract owner/repo from GitHub URL."""
+        if not repo_url:
+            return None
         m = re.search(r"github\.com[/:]([\w.-]+/[\w.-]+)", repo_url)
         if m:
             return m.group(1).replace(":", "/")

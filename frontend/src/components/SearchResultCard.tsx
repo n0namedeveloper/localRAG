@@ -9,14 +9,25 @@ interface SearchResult {
 
 export const SearchResultCard: React.FC<{ result: SearchResult }> = ({ result }) => {
   return (
-    <div className="p-4 border rounded-lg hover:shadow-lg transition-shadow">
-      <div className="flex justify-between items-center mb-2">
-        <span className="font-medium text-gray-800">{result.file_path}</span>
-        <span className="text-sm text-gray-500">
-          Lines {result.start_line}-{result.end_line}
+    <div className="glass-card" style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', wordBreak: 'break-all' }}>
+          {result.file_path}
+        </span>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)', background: 'var(--bg-tertiary)', padding: '2px 8px', borderRadius: 4 }}>
+          L{result.start_line}-{result.end_line}
         </span>
       </div>
-      <pre className="p-2 bg-gray-800 text-gray-100 rounded">
+      <pre style={{ 
+        margin: 0, 
+        padding: '12px', 
+        background: 'var(--bg-tertiary)', 
+        borderRadius: '8px', 
+        overflowX: 'auto',
+        fontSize: 13,
+        fontFamily: "'JetBrains Mono', monospace",
+        color: 'var(--text-secondary)'
+      }}>
         <code>{result.snippet}</code>
       </pre>
     </div>

@@ -122,7 +122,7 @@ class RepoStatusResponse(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    repo_url: str
+    repo_url: str | None = None
     question: str
     max_chunks: int = 15
     stream: bool = False
@@ -143,13 +143,13 @@ class SourceReference(BaseModel):
 
 class ChatResponse(BaseModel):
     answer: str
-    sources: list[SourceReference]
-    repo_name: str
+    sources: list[SourceReference] = []
+    repo_name: str | None = None
     question: str
 
 
 class SearchRequest(BaseModel):
-    repo_url: str
+    repo_url: str | None = None
     query: str
     top_k: int = 10
     score_threshold: float = 0.3

@@ -1,115 +1,152 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { RepoCard } from './RepoCard';
-import { useNavigate } from 'react-router-dom';
 import { Loader } from './Loader';
+import { useNavigate } from 'react-router-dom';
 
-interface Repo {
-  name: string;
+interface RepoStats {
+  repo_name: string;
   status: string;
-  files: number;
-  symbols: number;
-  nodes: number;
-  edges: number;
+  files_parsed: number;
+  symbols_count: number;
+  graph_nodes: number;
+  graph_edges: number;
 }
 
 export const Dashboard: React.FC = () => {
-  const [repos, setRepos] = useState<Repo[]>([]);
+  const [repos, setRepos] = useState<RepoStats[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
+  const [showModal, setShowModal] = useState(false);
+  const [repoUrl, setRepoUrl] = useState('');
+  const [adding, setAdding] = useState(false);
   const navigate = useNavigate();
 
-  useEffect(() => {
-    fetch('/api/repo/list')
-      .then(res => res.json())
-      .then((data: { repos: string[] }) => {
-        const repoPromises = data.repos.map(name =>
-          fetch(`/api/repo/stats/${encodeURIComponent(name)}`)
-            .then(res => res.ok ? res.json() : null)
-            .catch(() => null)
-        );
-        return Promise.all(repoPromises);
-      })
-      .then((statsArray) => {
-        const validRepos = statsArray.filter((s): s is Repo => s !== null);
-        setRepos(validRepos);
-        setLoading(false);
-      })
-      .catch(err => {
-        setError(err.message);
-        setLoading(false);
-      });
-  }, []);
-
-  const handleAddRepo = () => {
-    // Show simple clone form - in production would be modal
-    const url = prompt('Enter GitHub repository URL:');
-    if (url) {
-      fetch('/api/repo/clone', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ repo_url: url })
-      })
-      .then(() => window.location.reload())
-      .catch(err => setError(err.message));
+  const fetchRepos = async () => {
+    try {
+      const res = await fetch('/api/repo/list');
+      if (res.ok) {
+        const data = await res.json();
+        setRepos(data.repos || []);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
     }
   };
 
-  if (loading) return <Loader />;
-  if (error) return <div className="p-8 text-red-600">Error: {error}</div>;
+  useEffect(() => {
+    fetchRepos();
+    const interval = setInterval(fetchRepos, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleAddRepo = async () => {
+    if (!repoUrl.trim()) return;
+    setAdding(true);
+    try {
+      const res = await fetch('/api/repo/clone', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repo_url: repoUrl }),
+      });
+      if (res.ok) {
+        setRepoUrl('');
+        setShowModal(false);
+        fetchRepos();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setAdding(false);
+    }
+  };
+
+  const totalFiles = repos.reduce((acc, r) => acc + r.files_parsed, 0);
+  const totalSymbols = repos.reduce((acc, r) => acc + r.symbols_count, 0);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex justify-between items-center">
-          <h1 className="text-2xl font-bold text-gray-900">localRAG Dashboard</h1>
-          <div className="flex gap-3">
-            <button
-              onClick={() => navigate('/search')}
-              className="px-4 py-2 text-gray-700 hover:text-gray-900"
-            >
-              🔍 Search
-            </button>
-            <button
-              onClick={() => navigate('/chat')}
-              className="px-4 py-2 text-gray-700 hover:text-gray-900"
-            >
-              💬 Chat
-            </button>
-            <button
-              onClick={() => navigate('/logs')}
-              className="px-4 py-2 text-gray-700 hover:text-gray-900"
-            >
-              📋 Logs
-            </button>
-            <button
-              onClick={handleAddRepo}
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              + Add Repository
-            </button>
+    <div style={{ padding: '40px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0 }}>Overview</h1>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginTop: 4 }}>Manage and monitor your indexed repositories</p>
+        </div>
+        <button className="btn-primary" onClick={() => setShowModal(true)}>
+          + Add Repository
+        </button>
+      </div>
+
+      {/* Stats Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', marginBottom: '40px' }}>
+        <div className="glass-card" style={{ padding: '20px' }}>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 8 }}>Total Repositories</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-primary)' }}>{repos.length}</div>
+        </div>
+        <div className="glass-card" style={{ padding: '20px' }}>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 8 }}>Total Files</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-primary)' }}>{totalFiles}</div>
+        </div>
+        <div className="glass-card" style={{ padding: '20px' }}>
+          <div style={{ color: 'var(--text-secondary)', fontSize: 13, marginBottom: 8 }}>Total Symbols</div>
+          <div style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-primary)' }}>{totalSymbols}</div>
+        </div>
+      </div>
+
+      {/* Repositories */}
+      <h2 style={{ fontSize: 18, fontWeight: 600, marginBottom: '20px' }}>Your Repositories</h2>
+      
+      {loading ? (
+        <div style={{ display: 'flex', justifyContent: 'center', padding: 40 }}><Loader /></div>
+      ) : repos.length === 0 ? (
+        <div className="glass-card" style={{ padding: '40px', textAlign: 'center', borderStyle: 'dashed' }}>
+          <div style={{ fontSize: 32, marginBottom: 16 }}>📂</div>
+          <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>No repositories indexed yet</h3>
+          <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 24 }}>Add a GitHub repository to start using Code Intelligence</p>
+          <button className="btn-primary" onClick={() => setShowModal(true)}>Add your first repo</button>
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '20px' }}>
+          {repos.map((repo, i) => (
+            <RepoCard key={i} stats={repo} />
+          ))}
+        </div>
+      )}
+
+      {/* Add Repo Modal */}
+      {showModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.6)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 100
+        }}>
+          <div className="glass-card fade-in" style={{ padding: '32px', width: '100%', maxWidth: '440px', background: 'var(--bg-card)' }}>
+            <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>Add Repository</h2>
+            <p style={{ color: 'var(--text-secondary)', fontSize: 14, marginBottom: 24 }}>Enter a public GitHub repository URL.</p>
+            
+            <input 
+              type="text" 
+              className="input-field" 
+              placeholder="https://github.com/user/repo"
+              value={repoUrl}
+              onChange={e => setRepoUrl(e.target.value)}
+              autoFocus
+              onKeyDown={e => e.key === 'Enter' && handleAddRepo()}
+            />
+            
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginTop: 24 }}>
+              <button className="btn-ghost" onClick={() => setShowModal(false)}>Cancel</button>
+              <button className="btn-primary" onClick={handleAddRepo} disabled={adding || !repoUrl.trim()}>
+                {adding ? 'Adding...' : 'Start Indexing'}
+              </button>
+            </div>
           </div>
         </div>
-      </header>
-
-      <main className="max-w-7xl mx-auto p-6">
-        {repos.length === 0 ? (
-          <div className="text-center py-12">
-            <p className="text-gray-500 text-lg">No repositories indexed yet.</p>
-            <button
-              onClick={handleAddRepo}
-              className="mt-4 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
-            >
-              Clone & Index Your First Repo
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {repos.map((repo) => (
-              <RepoCard key={repo.name} stats={repo} />
-            ))}
-          </div>
-        )}
-      </main>
+      )}
     </div>
   );
 };

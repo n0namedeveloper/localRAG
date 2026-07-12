@@ -2,10 +2,10 @@
 
 import logging
 import json
-import time
+from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 
 from app.models.schemas import (
@@ -13,18 +13,19 @@ from app.models.schemas import (
     RepoStatusResponse,
     RepoListResponse,
     RepoStatsResponse,
-    LogEntry,
+    RepoStatus,
 )
 from app.config import INDEX_DIR
 from app.ingestion.pipeline import IngestionPipeline
-from app.ingestion.repo_manager import RepoManager
+from app.ingestion.repo_manager import RepoManager, repo_url_to_name
 from app.api.logs import put_log
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/repo", tags=["repo"])
-pipeline = IngestionPipeline()
 
+
+# ── Dependencies ────────────────────────────────────────────────────────────
 
 def get_pipeline(request: Request) -> IngestionPipeline:
     """Dependency: retrieve ingestion pipeline from app.state."""
@@ -42,76 +43,70 @@ def get_repo_manager(request: Request) -> RepoManager:
     return manager
 
 
-@router.post("/clone", response_model=RepoStatusResponse)
+# ── Background worker ───────────────────────────────────────────────────────
+
+def _run_ingestion(pipeline: IngestionPipeline, repo_url: str, branch: str | None, force_reindex: bool):
+    """Synchronous function run in a background thread by FastAPI BackgroundTasks."""
+    try:
+        result = pipeline.run(
+            repo_url=repo_url,
+            branch=branch,
+            force_reindex=force_reindex,
+        )
+        logger.info(f"Background ingestion finished: {result.get('repo_name')} — {result.get('status')}")
+    except Exception as e:
+        logger.exception(f"Background ingestion failed for {repo_url}: {e}")
+
+
+# ── Endpoints ───────────────────────────────────────────────────────────────
+
+@router.post("/clone", status_code=202)
 async def clone_repo(
     request: RepoCloneRequest,
+    background_tasks: BackgroundTasks,
     pipeline: IngestionPipeline = Depends(get_pipeline),
 ):
     """
-    Clone or update a repository and start indexing.
+    Clone or update a repository and start indexing (non-blocking).
 
-    Body:
-        {
-            "repo_url": "https://github.com/user/repo",
-            "branch": "main",
-            "force_reindex": false
-        }
+    Returns 202 immediately. Poll /api/repo/stats/{repo_name} to check progress.
     """
-    try:
-        effective_branch = request.branch if request.branch and request.branch.strip() else None
-        result = pipeline.run(
-            repo_url=request.repo_url,
-            branch=effective_branch,
-            force_reindex=request.force_reindex,
-        )
-        await put_log({
-            "timestamp": datetime.utcnow().isoformat(),
-            "level": "INFO",
-            "message": f"Cloning repository: {request.repo_url}",
-            "repo_name": result["repo_name"],
-            "stage": "cloning",
-        })
-        return RepoStatusResponse(
-            repo_url=request.repo_url,
-            repo_name=result["repo_name"],
-            status=result["status"],
-            files_parsed=result.get("files_parsed", 0),
-            symbols_count=result.get("symbols_count", 0),
-            last_indexed=None,
-            error_message=result.get("error"),
-        )
-    except Exception as e:
-        logger.exception("Clone error")
-        raise HTTPException(status_code=500, detail=str(e))
+    repo_name = repo_url_to_name(request.repo_url)
+    effective_branch = request.branch if request.branch and request.branch.strip() else None
 
+    # Fire-and-forget: ingestion runs in a background thread
+    background_tasks.add_task(
+        _run_ingestion,
+        pipeline,
+        request.repo_url,
+        effective_branch,
+        request.force_reindex,
+    )
 
-@router.get("/status/{repo_url}", response_model=RepoStatusResponse)
-async def get_repo_status(
-    repo_url: str,
-    pipeline: IngestionPipeline = Depends(get_pipeline),
-):
-    """Get the current indexing status of a repository."""
-    try:
-        status_enum = pipeline.get_repo_status(repo_url)
-        stats = pipeline.get_index_stats(repo_url)
-        return RepoStatusResponse(
-            repo_url=repo_url,
-            repo_name=stats.get("repo_name", "unknown"),
-            status=status_enum,
-            files_parsed=stats.get("files_parsed", 0),
-            symbols_count=stats.get("symbols_count", 0),
-            last_indexed=None,
-            error_message=None,
-        )
-    except Exception as e:
-        logger.exception("Status error")
-        raise HTTPException(status_code=500, detail=str(e))
+    await put_log({
+        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "level": "INFO",
+        "message": f"Queued ingestion for: {request.repo_url}",
+        "repo_name": repo_name,
+        "stage": "queued",
+    })
+
+    return {
+        "repo_name": repo_name,
+        "repo_url": request.repo_url,
+        "status": "indexing",
+        "message": "Ingestion started in background. Poll /api/repo/stats/{repo_name} for progress.",
+    }
 
 
 @router.get("/list", response_model=RepoListResponse)
 async def list_repos():
     """List all indexed repositories with detailed statistics."""
     repos: list[RepoStatsResponse] = []
+
+    if not INDEX_DIR.exists():
+        return RepoListResponse(repos=[])
+
     for idx_dir in INDEX_DIR.iterdir():
         if not idx_dir.is_dir():
             continue
@@ -137,7 +132,6 @@ async def list_repos():
                 chunks_count = meta.get("chunks_count", 0)
                 last_idx_str = meta.get("last_indexed")
                 if last_idx_str:
-                    from datetime import datetime
                     try:
                         last_indexed = datetime.fromisoformat(last_idx_str)
                     except Exception:
@@ -172,24 +166,15 @@ async def list_repos():
     return RepoListResponse(repos=repos)
 
 
-@router.get("/{repo_name}", response_model=RepoStatusResponse)
-async def get_repo_status(
-    repo_name: str,
-):
+@router.get("/stats/{repo_name}", response_model=RepoStatsResponse)
+async def get_repo_stats(repo_name: str):
     """Get detailed statistics for a specific repository."""
     repo_dir = INDEX_DIR / repo_name
     meta_file = repo_dir / "meta.json"
+    graph_file = repo_dir / "graph.json"
 
     if not repo_dir.exists():
-        return RepoStatusResponse(
-            repo_url="",
-            repo_name=repo_name,
-            status=RepoStatus.NOT_FOUND,
-            files_parsed=0,
-            symbols_count=0,
-            last_indexed=None,
-            error_message="Repository not found",
-        )
+        raise HTTPException(status_code=404, detail=f"Repository '{repo_name}' not found")
 
     files_parsed = 0
     symbols_count = 0
@@ -208,7 +193,6 @@ async def get_repo_status(
             chunks_count = meta.get("chunks_count", 0)
             last_idx_str = meta.get("last_indexed")
             if last_idx_str:
-                from datetime import datetime
                 try:
                     last_indexed = datetime.fromisoformat(last_idx_str)
                 except Exception:
@@ -217,12 +201,69 @@ async def get_repo_status(
         except Exception:
             pass
 
+    if graph_file.exists():
+        try:
+            with open(graph_file, "r", encoding="utf-8") as f:
+                g = json.load(f)
+            graph_nodes = len(g.get("nodes", []))
+            graph_edges = len(g.get("edges", []))
+        except Exception:
+            pass
+
+    return RepoStatsResponse(
+        repo_name=repo_name,
+        status="ready" if meta_file.exists() else "indexing",
+        files_parsed=files_parsed,
+        symbols_count=symbols_count,
+        chunks_count=chunks_count,
+        graph_nodes=graph_nodes,
+        graph_edges=graph_edges,
+        last_indexed=last_indexed,
+        languages=languages,
+    )
+
+
+@router.get("/{repo_name}", response_model=RepoStatusResponse)
+async def get_repo_status(repo_name: str):
+    """Get status for a specific repository."""
+    repo_dir = INDEX_DIR / repo_name
+    meta_file = repo_dir / "meta.json"
+
+    if not repo_dir.exists():
+        return RepoStatusResponse(
+            repo_url="",
+            repo_name=repo_name,
+            status=RepoStatus.NOT_FOUND,
+            files_indexed=0,
+            symbols_indexed=0,
+            last_indexed=None,
+            error_message="Repository not found",
+        )
+
+    files_parsed = 0
+    symbols_count = 0
+    last_indexed = None
+
+    if meta_file.exists():
+        try:
+            with open(meta_file, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            files_parsed = meta.get("files_parsed", 0)
+            symbols_count = meta.get("symbols_count", 0)
+            last_idx_str = meta.get("last_indexed")
+            if last_idx_str:
+                try:
+                    last_indexed = datetime.fromisoformat(last_idx_str)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     return RepoStatusResponse(
         repo_url="",
         repo_name=repo_name,
         status=RepoStatus.READY if meta_file.exists() else RepoStatus.NOT_FOUND,
-        files_parsed=files_parsed,
-        symbols_count=symbols_count,
-        chunks_count=chunks_count,
+        files_indexed=files_parsed,
+        symbols_indexed=symbols_count,
         last_indexed=last_indexed,
     )

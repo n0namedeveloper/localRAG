@@ -9,21 +9,26 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@types/dagre": "^0.7.54",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "dagre": "^0.8.5",
+    "prismjs": "^1.29.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-markdown": "^10.1.0",
     "react-router-dom": "^6.21.0",
-    "reactflow": "^11.7.0",
-    "prismjs": "^1.29.0"
+    "react-syntax-highlighter": "^16.1.1",
+    "reactflow": "^11.7.0"
   },
   "devDependencies": {
+    "@types/prismjs": "^1.26.0",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
-    "@types/prismjs": "^1.26.0",
     "@vitejs/plugin-react": "^4.2.1",
-    "typescript": "^5.2.2",
-    "vite": "^5.0.8",
-    "tailwindcss": "^3.4.0",
+    "autoprefixer": "^10.4.16",
     "postcss": "^8.4.32",
-    "autoprefixer": "^10.4.16"
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.2.2",
+    "vite": "^5.0.8"
   }
 }

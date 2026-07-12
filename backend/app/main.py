@@ -28,7 +28,7 @@ from app.api.repo import router as repo_router
 from app.api.search import router as search_router
 from app.api.health import router as health_router
 from app.api.graph import router as graph_router
-from app.api.logs import router as logs_router
+from app.api.logs import router as logs_router, SSELoggingHandler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +36,13 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 logger = logging.getLogger(__name__)
+
+# Route ingestion logs to the SSE stream
+ingestion_logger = logging.getLogger("app.ingestion")
+ingestion_logger.setLevel(logging.INFO)
+sse_handler = SSELoggingHandler()
+sse_handler.setFormatter(logging.Formatter("%(message)s"))
+ingestion_logger.addHandler(sse_handler)
 
 
 @asynccontextmanager

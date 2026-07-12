@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException
 from app.models.schemas import GraphDataResponse
 from app.config import INDEX_DIR
 
-router = APIRouter(prefix="/graph", tags=["graph"])
+router = APIRouter(prefix="/api/graph", tags=["graph"])
 logger = logging.getLogger(__name__)
 
 
