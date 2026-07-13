@@ -1,73 +1,88 @@
-# 🤖 CodeRAG: Chat with GitHub Repositories
+<div align="center">
+  <h1>🤖 CodeRAG: Chat with GitHub Repositories</h1>
+  <p>Chat with your GitHub repositories using Retrieval-Augmented Generation (RAG) and code-aware context. This project enables you to ask natural language questions about any GitHub repository and get precise answers with source code references, navigate repository graphs, and use an autonomous coding agent.</p>
 
-Chat with your GitHub repositories using Retrieval-Augmented Generation (RAG) and code-aware context. This project enables you to ask natural language questions about any GitHub repository and get precise answers with source code references.
+  <img src="./docs/screenshots/hero.png" alt="CodeRAG Hero Image" width="800"/>
+</div>
+
+---
 
 ## 🔍 Features
 
-- **Code-Aware RAG**: Understands functions, classes, and dependencies using AST parsing
-- **Semantic Search**: Find relevant code snippets using vector embeddings
-- **Graph Traversal**: Expands context with dependency graphs (+1 hop)
-- **GitHub Permalinks**: Answers include direct links to source code
-- **Streaming Responses**: Real-time chat experience
-- **Multi-Language Support**: Works with Python, JavaScript, TypeScript, Java, Go, and more
-- **FastAPI Backend**: RESTful API with streaming support
-- **Streamlit UI**: Interactive web interface
+- **🧠 Code-Aware RAG**: Understands functions, classes, and dependencies using AST parsing (`tree-sitter`).
+- **🔍 Semantic Search**: Find relevant code snippets instantly using vector embeddings (`BAAI/bge-m3`).
+- **🕸️ Interactive Graph Traversal**: Visualizes codebase architecture, dependencies, and "Git Hotspots" (most frequently modified files).
+- **🤖 Agent Mode**: Autonomous planning mode that creates step-by-step implementation plans for complex tasks.
+- **🔗 GitHub Permalinks**: Answers include direct links to the exact lines of source code.
+- **⚡ Streaming Responses**: Real-time chat experience with raw stream handling.
+- **🌐 Multi-Language Support**: Works with Python, JavaScript, TypeScript, Java, Go, and more.
+- **🦙 Local & Cloud LLMs**: Seamlessly switch between DeepSeek and local models via Ollama.
+
+---
+
+## 📸 Screenshots
+
+### Dashboard & Repository Management
+![Dashboard](./docs/screenshots/dashboard.png)
+*Manage and index multiple repositories simultaneously.*
+
+### Semantic Code Search
+![Semantic Search](./docs/screenshots/search.png)
+*Instantly find and understand specific code implementations.*
+
+### Interactive Dependency Graph
+![Graph View](./docs/screenshots/graph.png)
+*Navigate file dependencies and track Git Hotspots.*
+
+### Agent Planning Mode
+![Agent Mode](./docs/screenshots/agent.png)
+*Let the Agent generate comprehensive implementation plans.*
+
+---
 
 ## 🏗️ Architecture
 
 ```mermaid
 graph TD
-    A[User] --> B[Streamlit UI]
-    B --> C[FastAPI Backend]
-    C --> D[Git Clone/Update]
-    D --> E[Tree-sitter Parser]
-    E --> F[Code Chunker]
-    F --> G[Embedding Model]
-    G --> H[Qdrant Vector DB]
-    H --> I[RAG Engine]
-    I --> J[DeepSeek LLM]
-    J --> K[Answer + Sources]
-    K --> C
-    C --> L[Return to UI]
+    A[User Browser] --> B[Nginx Reverse Proxy]
+    B -->|Static Files| C[React/Vite Frontend]
+    B -->|/api/*| D[FastAPI Backend]
+    
+    D --> E[Git Clone/Update]
+    E --> F[Tree-sitter Parser]
+    F --> G[Code Chunker]
+    G --> H[Local Embedding Model]
+    H --> I[(Qdrant Vector DB)]
+    
+    D --> J[RAG Engine]
+    I -.->|Vector Search| J
+    J --> K[DeepSeek / Ollama]
+    K --> L[Answer + Code Sources]
+    L --> D
 ```
-
-### Components
-
-1. **Backend (Python)**
-   - FastAPI server with REST endpoints
-   - RAG engine with semantic + graph search
-   - Ingestion pipeline for indexing repos
-   - Tree-sitter parser for AST-aware code chunks
-
-2. **Frontend (Streamlit)**
-   - Web UI for chatting and searching
-   - Repository management
-   - Real-time streaming responses
-
-3. **Infrastructure**
-   - Qdrant for vector storage
-   - Docker for containerization
 
 ## 🛠️ Tech Stack
 
+This project was recently modernized for maximum performance:
+
 | Layer       | Technology         |
 |-------------|--------------------|
-| Backend     | Python, FastAPI    |
-| Frontend    | Streamlit          |
-| Parsing     | tree-sitter        |
-| Embeddings  | Sentence Transformers |
-| Vector DB   | Qdrant             |
-| LLM         | DeepSeek V4        |
-| Container   | Docker             |
+| **Backend** | Python 3.12, FastAPI, `uv` (Package Manager) |
+| **Frontend**| React, TypeScript, Vite, `bun` (Package Manager), Nginx |
+| **Parsing** | tree-sitter        |
+| **Embeddings**| Sentence Transformers (`BAAI/bge-m3` local execution) |
+| **Vector DB** | Qdrant             |
+| **LLMs**    | DeepSeek V4, Ollama (Llama 3, Qwen) |
+| **Container** | Docker & Docker Compose |
+
+---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
 - Docker & Docker Compose
-- Python 3.9+
 - Git
-- Node.js (for frontend, if needed)
 
 ### Installation
 
@@ -77,158 +92,78 @@ git clone https://github.com/n0namedeveloper/localRAG.git
 cd localRAG
 ```
 
-2. Copy environment file:
+2. Copy the environment file:
 ```bash
 cp .env.example .env
 ```
 
-3. Build and start services:
+3. Edit `.env` and add your DeepSeek API Key (or configure Ollama in the UI later).
+
+4. Build and start services (using our optimized Docker setup):
 ```bash
-docker-compose up --build
+docker-compose up --build -d
 ```
 
-4. Access the UI:
-   - Backend API: http://localhost:8000
-   - Streamlit UI: http://localhost:8501
+5. Access the application:
+   - **Web UI**: http://localhost:3000
+   - **Backend API**: http://localhost:8000
+
+---
 
 ## 📁 Project Structure
 
-```
+```text
 .
 ├── backend/                 # FastAPI backend
-│   ├── app/
-│   │   ├── api/             # API endpoints
-│   │   ├── core/            # Core logic (RAG, LLM, embedding, vector store)
-│   │   ├── ingestion/       # Ingestion pipeline
-│   │   └── models/         # Pydantic models
-│   └── requirements.txt
-├── frontend/                # Streamlit UI
-│   └── streamlit_app.py
-├── data/                    # Data storage
-│   ├── qdrant_storage/      # Qdrant persistent storage
-│   └── repos/              # Cloned repositories
-├── docker-compose.yml
-├── Dockerfile
-├── Dockerfile.ui
-├── requirements.txt
-├── temp_openapi.json
-├── TESTING_GUIDE.md
+│   ├── app/                 # API endpoints, RAG core, AST Ingestion
+│   ├── Dockerfile           # Backend container (astral-sh/uv based)
+│   └── pyproject.toml       # Python dependencies managed by uv
+├── frontend/                # React Vite UI
+│   ├── src/                 # React components and contexts
+│   ├── nginx.conf           # Nginx reverse proxy configuration
+│   ├── Dockerfile           # Frontend container (oven/bun based)
+│   └── package.json         # Node dependencies managed by bun
+├── data/                    # Ignored in git (Qdrant storage, cloned repos)
+├── grammars/                # Tree-sitter compiled grammars
+├── docker-compose.yml       # Optimized compose file (no exposed internal ports)
 └── README.md
 ```
 
-## 🧠 How It Works
-
-1. **Ingestion Pipeline**
-   - Clone or update repository
-   - Parse files with tree-sitter (AST-aware)
-   - Chunk code by symbols (functions, classes)
-   - Build dependency graph
-   - Embed and index into Qdrant
-
-2. **RAG Process**
-   - Semantic search in Qdrant
-   - Expand with graph neighbors (+1 hop)
-   - Build augmented prompt
-   - Query DeepSeek LLM
-   - Parse answer for source references
-
-3. **Response Format**
-```json
-{
-  "answer": "The auth function checks JWT token validity...",
-  "sources": [
-    {
-      "file_path": "auth/utils.py",
-      "start_line": 42,
-      "end_line": 55,
-      "symbol_name": "validate_token",
-      "symbol_type": "function",
-      "snippet": "def login_user(username, password):",
-      "relevance_score": 0.95,
-      "github_url": "https://github.com/user/repo/blob/main/auth/login.py#L42"
-    }
-  ],
-  "repo_name": "user/repo",
-  "question": "How does authorization work?"
-}
-```
-
-## 📡 API Endpoints
-
-### Chat
-- `POST /api/chat` - Synchronous chat
-- `POST /api/chat/stream` - Streaming chat
-
-### Repository
-- `POST /api/repo/clone` - Clone/update and index repo
-- `GET /api/repo/status/{repo_url}` - Get indexing status
-- `GET /api/repo/list` - List all repos
-
-### Search
-- `POST /api/search` - Direct vector search
-
-### Health
-- `GET /api/health` - Service health check
-
-## 🎯 Example Usage
-
-1. Enter a GitHub repo URL in the sidebar
-2. Click "Clone & Index"
-3. Ask questions like:
-   - "How does the login flow work?"
-   - "Show me the database connection code"
-   - "What are the dependencies of User model?"
-
-4. Get answers with:
-   - Natural language explanation
-   - Code snippets
-   - GitHub permalinks to source
+---
 
 ## ⚙️ Configuration
 
-Edit `.env` file:
+The `.env` file supports the following core configurations:
 
 ```env
-# DeepSeek API (via OpenRouter or direct DeepSeek API)
+# DeepSeek API
 DEEPSEEK_API_KEY=your_api_key_here
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-DEEPSEEK_MODEL=deepseek-chat
 
-# Qdrant
-QDRANT_HOST=localhost
+# Qdrant Database
+QDRANT_HOST=qdrant
 QDRANT_PORT=6333
 
-# Application
-DATA_DIR=./data
+# Application limits
+DATA_DIR=/app/data
 MAX_CHUNKS_PER_QUERY=15
 LOG_LEVEL=INFO
 ```
+*Note: You can override LLM settings directly in the Web UI Settings tab.*
 
-## 🧪 Testing
-
-Run tests:
-```bash
-python tests/test_system_structure.py
-```
+---
 
 ## 🤝 Contributing
 
-1. Fork it
-2. Create your feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a new Pull Request
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
 ## 📄 License
 
-Distributed under the MIT License. See [LICENSE](LICENSE).
+Distributed under the MIT License. See `LICENSE` for more information.
 
-## 🙏 Acknowledgements
-
-- [tree-sitter](https://tree-sitter.github.io/)
-- [Qdrant](https://qdrant.tech/)
-- [DeepSeek](https://www.deepseek.com/)
-- [FastAPI](https://fastapi.tiangolo.com/)
-- [Streamlit](https://streamlit.io/)
-
-Made with ❤️ and 🤖 by Artsiom Beniash. Make the world a better place to live! <3
+---
+*Made with ❤️ and 🤖 by Artsiom Beniash. Make the world a better place to live! <3*
