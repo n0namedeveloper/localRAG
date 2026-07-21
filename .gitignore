@@ -159,3 +159,7 @@ logs/
 node_modules/
 backend_logs.txt
 
+
+.venv/
+
+__pycache__/
