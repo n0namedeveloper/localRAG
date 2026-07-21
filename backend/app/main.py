@@ -90,6 +90,7 @@ app.add_middleware(
 )
 
 from app.api.agent import router as agent_router
+from app.api.docs import router as docs_router
 
 app.include_router(chat_router)
 app.include_router(repo_router)
@@ -99,6 +100,7 @@ app.include_router(agent_router)
 app.include_router(health_router)
 app.include_router(graph_router)
 app.include_router(logs_router)
+app.include_router(docs_router)
 
 
 @app.get("/")
